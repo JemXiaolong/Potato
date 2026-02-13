@@ -24,7 +24,11 @@ const App = {
     }
 
     // Inicializar componentes
-    Sidebar.init('file-tree', (path, name) => this.openNote(path, name));
+    Sidebar.init(
+      'file-tree',
+      (path, name) => this.openNote(path, name),
+      (filePath, fileName, destDir) => this._onFileDrop(filePath, fileName, destDir),
+    );
 
     Editor.init('editor', (content) => {
       this.state.dirty = true;
@@ -47,14 +51,63 @@ const App = {
     // Sync button
     document.getElementById('sync-btn').addEventListener('click', () => this.gitSync());
 
+    // Close note button
+    document.getElementById('close-note-btn').addEventListener('click', () => this.closeNote());
+
     // Sidebar resize
     this._initSidebarResize();
 
     // Listen for git progress events
     this._initProgressBar();
 
-    // Mostrar welcome
-    this._showWelcome();
+    // Search palette
+    this._initSearch();
+
+    // Restaurar sesion anterior
+    await this._restoreSession();
+
+    // Mostrar welcome si no hay nota abierta
+    if (!this.state.currentNote) {
+      this._showWelcome();
+    }
+  },
+
+  // -- Session -------------------------------------------------------------
+
+  async _saveSession() {
+    try {
+      await this.invoke('save_session', {
+        vaultPath: this.state.vaultPath || null,
+        notePath: this.state.currentNote ? this.state.currentNote.path : null,
+        noteTitle: this.state.currentNote ? this.state.currentNote.title : null,
+      });
+    } catch (err) {
+      console.warn('No se pudo guardar sesion:', err);
+    }
+  },
+
+  async _restoreSession() {
+    try {
+      const session = await this.invoke('load_session');
+      if (!session || !session.vault_path) return false;
+
+      // Verificar que el vault aun existe
+      const entries = await this.invoke('list_vault', { path: session.vault_path });
+      if (!entries) return false;
+
+      // Restaurar vault
+      await this._loadVault(session.vault_path);
+
+      // Restaurar nota si habia una abierta
+      if (session.note_path && session.note_title) {
+        await this.openNote(session.note_path, session.note_title);
+      }
+
+      return true;
+    } catch (err) {
+      console.warn('No se pudo restaurar sesion:', err);
+      return false;
+    }
   },
 
   // -- Vault ---------------------------------------------------------------
@@ -84,6 +137,9 @@ const App = {
 
     // Check git status
     await this._checkGitStatus();
+
+    // Guardar sesion
+    this._saveSession();
   },
 
   async refreshVault() {
@@ -117,6 +173,39 @@ const App = {
     if (this.state.mode === 'edit') {
       Editor.focus();
     }
+
+    // Mostrar controles de nota
+    document.getElementById('mode-toggle').classList.remove('hidden');
+    document.getElementById('close-note-btn').classList.remove('hidden');
+
+    // Guardar sesion
+    this._saveSession();
+  },
+
+  async closeNote() {
+    // Guardar antes de cerrar
+    await this.saveCurrentNote();
+
+    this.state.currentNote = null;
+    this.state.dirty = false;
+
+    // Ocultar controles de nota
+    document.getElementById('mode-toggle').classList.add('hidden');
+    document.getElementById('close-note-btn').classList.add('hidden');
+
+    // Limpiar editor y titulo
+    Editor.setValue('');
+    Editor.hide();
+    this._setTitle('');
+
+    // Deseleccionar en sidebar
+    Sidebar.setActive(null);
+
+    // Mostrar welcome
+    this._showWelcome();
+
+    // Guardar sesion (sin nota)
+    this._saveSession();
   },
 
   async saveCurrentNote() {
@@ -135,22 +224,49 @@ const App = {
     }, 1500);
   },
 
-  async createNote() {
-    if (!this.state.vaultPath) {
-      alert('Primero abre un vault (Ctrl+O)');
-      return;
-    }
+  createNote() {
+    if (!this.state.vaultPath) return;
 
-    const name = prompt('Nombre de la nota:');
-    if (!name || !name.trim()) return;
+    const modal = document.getElementById('newnote-modal');
+    const input = document.getElementById('newnote-input');
+    const actionBtn = document.getElementById('newnote-btn-action');
+    const cancelBtn = document.getElementById('newnote-btn-cancel');
+    const closeBtn = document.getElementById('newnote-modal-close');
 
-    const path = await this.invoke('create_note', {
-      vaultPath: this.state.vaultPath,
-      name: name.trim(),
-    });
+    modal.classList.add('open');
+    input.value = '';
+    input.focus();
 
-    await this.refreshVault();
-    await this.openNote(path, name.trim());
+    const close = () => modal.classList.remove('open');
+
+    cancelBtn.onclick = close;
+    closeBtn.onclick = close;
+
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        actionBtn.click();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    };
+
+    actionBtn.onclick = async () => {
+      const name = input.value.trim();
+      if (!name) return;
+
+      close();
+
+      const path = await this.invoke('create_note', {
+        vaultPath: this.state.vaultPath,
+        name,
+      });
+
+      await this.refreshVault();
+      await this.openNote(path, name);
+    };
   },
 
   // -- Wikilinks -----------------------------------------------------------
@@ -287,6 +403,24 @@ const App = {
           e.preventDefault();
           this.toggleSidebar();
           break;
+        case 'w':
+          e.preventDefault();
+          this.closeNote();
+          break;
+        case 'p':
+        case 'f':
+          e.preventDefault();
+          this._openSearch();
+          break;
+      }
+    }
+
+    // Escape para cerrar search o nota
+    if (e.key === 'Escape') {
+      if (document.getElementById('search-overlay').classList.contains('open')) {
+        this._closeSearch();
+      } else if (this.state.currentNote) {
+        this.closeNote();
       }
     }
   },
@@ -345,35 +479,61 @@ const App = {
     });
   },
 
-  async _showGitHubDialog() {
-    const url = prompt('URL del repositorio GitHub:\n\nEjemplo: https://github.com/usuario/mi-vault.git');
-    if (!url || !url.trim()) return;
+  _showGitHubDialog() {
+    const modal = document.getElementById('clone-modal');
+    const input = document.getElementById('clone-url-input');
+    const actionBtn = document.getElementById('clone-btn-action');
+    const cancelBtn = document.getElementById('clone-btn-cancel');
+    const closeBtn = document.getElementById('clone-modal-close');
 
-    // Ask where to clone
-    this._setStatus('Selecciona carpeta destino...');
-    const destFolder = await this.invoke('pick_folder');
-    if (!destFolder) {
-      this._setStatus('Cancelado');
-      return;
-    }
+    modal.classList.add('open');
+    input.value = '';
+    input.focus();
+    actionBtn.disabled = false;
+    actionBtn.textContent = 'Clonar';
 
-    // Build clone path: destFolder/repoName
-    const repoName = url.trim().split('/').pop().replace('.git', '') || 'vault';
-    const clonePath = destFolder + '/' + repoName;
+    const close = () => modal.classList.remove('open');
 
-    this._setStatus('Clonando repositorio...');
-    this._showProgress();
-    try {
-      const result = await this.invoke('git_clone', { url: url.trim(), path: clonePath });
-      this._hideProgress();
-      this._setStatus('Clonado exitosamente');
+    cancelBtn.onclick = close;
+    closeBtn.onclick = close;
 
-      // Open cloned repo as vault
-      await this._loadVault(result);
-    } catch (err) {
-      this._hideProgress();
-      this._showGitError(err, 'clonar');
-    }
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        actionBtn.click();
+      }
+    };
+
+    actionBtn.onclick = async () => {
+      const url = input.value.trim();
+      if (!url) return;
+
+      close();
+
+      // Ask where to clone
+      this._setStatus('Selecciona carpeta destino...');
+      const destFolder = await this.invoke('pick_folder');
+      if (!destFolder) {
+        this._setStatus('Cancelado');
+        return;
+      }
+
+      // Build clone path
+      const repoName = url.split('/').pop().replace('.git', '') || 'vault';
+      const clonePath = destFolder + '/' + repoName;
+
+      this._setStatus('Clonando repositorio...');
+      this._showProgress();
+      try {
+        const result = await this.invoke('git_clone', { url, path: clonePath });
+        this._hideProgress();
+        this._setStatus('Clonado exitosamente');
+        await this._loadVault(result);
+      } catch (err) {
+        this._hideProgress();
+        this._showGitError(err, 'clonar');
+      }
+    };
   },
 
   // -- Git Sync (Interactive) -------------------------------------------------
@@ -685,6 +845,67 @@ const App = {
     cancelBtn.style.display = '';
   },
 
+  // -- Move file (drag & drop) ------------------------------------------------
+
+  _onFileDrop(filePath, fileName, destDir) {
+    // destDir is null when dropping on vault root
+    const destPath = destDir || this.state.vaultPath;
+    if (!destPath) return;
+
+    const destName = destDir ? destDir.split('/').pop() : 'raiz del vault';
+
+    const modal = document.getElementById('move-modal');
+    const closeBtn = document.getElementById('move-modal-close');
+    const cancelBtn = document.getElementById('move-btn-cancel');
+    const actionBtn = document.getElementById('move-btn-action');
+
+    // Display file and folder names
+    document.getElementById('move-file-name').textContent = fileName;
+    document.getElementById('move-dest-name').textContent = destName;
+
+    modal.classList.add('open');
+
+    const close = () => modal.classList.remove('open');
+
+    closeBtn.onclick = close;
+    cancelBtn.onclick = close;
+
+    actionBtn.onclick = async () => {
+      close();
+
+      try {
+        const newPath = await this.invoke('move_file', {
+          from: filePath,
+          toDir: destPath,
+        });
+
+        // If the moved file is the currently open note, update its path
+        if (this.state.currentNote && this.state.currentNote.path === filePath) {
+          this.state.currentNote.path = newPath;
+          this._saveSession();
+        }
+
+        // Refresh the vault tree
+        await this.refreshVault();
+
+        // Re-select the moved file if it was active
+        if (this.state.currentNote && this.state.currentNote.path === newPath) {
+          Sidebar.setActive(newPath);
+        }
+
+        this._setStatus('Archivo movido');
+        setTimeout(() => {
+          if (this.state.currentNote) {
+            this._setStatus(this.state.currentNote.title);
+          }
+        }, 1500);
+      } catch (err) {
+        this._setStatus('Error al mover');
+        alert('Error al mover archivo:\n\n' + err);
+      }
+    };
+  },
+
   _openInExplorer() {
     if (!this.state.vaultPath) {
       alert('Primero abre un vault (Ctrl+O)');
@@ -696,8 +917,15 @@ const App = {
   },
 
   _showSettings() {
-    // TODO: Panel de ajustes
-    alert('Ajustes (proximamente)\n\n- Tema claro/oscuro\n- Tamano de fuente\n- Auto-guardado\n- Atajos de teclado');
+    const modal = document.getElementById('settings-modal');
+    const closeBtn = document.getElementById('settings-modal-close');
+    const actionBtn = document.getElementById('settings-btn-close');
+
+    modal.classList.add('open');
+
+    const close = () => modal.classList.remove('open');
+    closeBtn.onclick = close;
+    actionBtn.onclick = close;
   },
 
   _showGitError(err, action) {
@@ -773,34 +1001,161 @@ const App = {
     document.getElementById('status-text').textContent = text;
   },
 
-  _showWelcome() {
-    const welcome = [
-      '# POTATO',
-      '',
-      'Abre un vault con **Ctrl+O** o clona un repo desde el menu.',
-      '',
-      '---',
-      '',
-      '**Atajos**',
-      '',
-      '| Atajo | Accion |',
-      '|---|---|',
-      '| `Ctrl+O` | Abrir vault |',
-      '| `Ctrl+N` | Nueva nota |',
-      '| `Ctrl+S` | Guardar |',
-      '| `Ctrl+Shift+S` | Sync con GitHub |',
-      '| `Ctrl+E` | Edit / Read |',
-      '| `Ctrl+B` | Toggle sidebar |',
-      '',
-      'Usa `[[nombre]]` para enlazar notas.',
-      '',
-      '---',
-      '',
-      '`Developed by JemXiaoLong`',
-    ].join('\n');
+  // -- Search ----------------------------------------------------------------
 
-    Editor.setValue(welcome);
-    this.setMode('read');
+  _searchTimeout: null,
+  _searchIndex: -1,
+
+  _initSearch() {
+    const overlay = document.getElementById('search-overlay');
+    const input = document.getElementById('search-input');
+
+    // Close on overlay click
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this._closeSearch();
+    });
+
+    // Search on input
+    input.addEventListener('input', () => {
+      clearTimeout(this._searchTimeout);
+      this._searchTimeout = setTimeout(() => this._doSearch(), 200);
+    });
+
+    // Keyboard navigation
+    input.addEventListener('keydown', (e) => {
+      const items = document.querySelectorAll('.search-result');
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        this._searchIndex = Math.min(this._searchIndex + 1, items.length - 1);
+        this._highlightSearchResult(items);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        this._searchIndex = Math.max(this._searchIndex - 1, 0);
+        this._highlightSearchResult(items);
+      } else if (e.key === 'Enter' && this._searchIndex >= 0 && items[this._searchIndex]) {
+        e.preventDefault();
+        items[this._searchIndex].click();
+      }
+    });
+  },
+
+  _openSearch() {
+    if (!this.state.vaultPath) return;
+    const overlay = document.getElementById('search-overlay');
+    const input = document.getElementById('search-input');
+    overlay.classList.add('open');
+    input.value = '';
+    input.focus();
+    this._searchIndex = -1;
+    document.getElementById('search-results').innerHTML = '<div class="search-empty">Escribe para buscar...</div>';
+  },
+
+  _closeSearch() {
+    document.getElementById('search-overlay').classList.remove('open');
+    document.getElementById('search-input').value = '';
+  },
+
+  async _doSearch() {
+    const query = document.getElementById('search-input').value.trim();
+    const container = document.getElementById('search-results');
+
+    if (!query || query.length < 2) {
+      container.innerHTML = '<div class="search-empty">Escribe al menos 2 caracteres...</div>';
+      this._searchIndex = -1;
+      return;
+    }
+
+    try {
+      const results = await this.invoke('search_vault', {
+        path: this.state.vaultPath,
+        query,
+      });
+
+      if (results.length === 0) {
+        container.innerHTML = '<div class="search-empty">Sin resultados para "' + query + '"</div>';
+        this._searchIndex = -1;
+        return;
+      }
+
+      container.innerHTML = '';
+      this._searchIndex = 0;
+
+      for (const r of results) {
+        const item = document.createElement('div');
+        item.className = 'search-result';
+
+        const badgeClass = r.match_type === 'name' ? 'name' : 'content';
+        const badgeText = r.match_type === 'name' ? 'nombre' : 'L' + r.line;
+
+        // Highlight query in name and preview
+        const highlightedName = this._highlightText(r.name, query);
+        const highlightedPreview = r.preview ? this._highlightText(r.preview, query) : '';
+
+        let html = '<div class="search-result-top">'
+          + '<span class="search-result-name">' + highlightedName + '</span>'
+          + '<span class="search-result-badge ' + badgeClass + '">' + badgeText + '</span>'
+          + '</div>';
+
+        if (highlightedPreview) {
+          html += '<div class="search-result-preview">' + highlightedPreview + '</div>';
+        }
+
+        item.innerHTML = html;
+        item.addEventListener('click', () => {
+          this._closeSearch();
+          this.openNote(r.path, r.name);
+        });
+
+        container.appendChild(item);
+      }
+
+      this._highlightSearchResult(document.querySelectorAll('.search-result'));
+
+    } catch (err) {
+      container.innerHTML = '<div class="search-empty">Error: ' + err + '</div>';
+    }
+  },
+
+  _highlightText(text, query) {
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('(' + escaped + ')', 'gi');
+    return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(re, '<mark>$1</mark>');
+  },
+
+  _highlightSearchResult(items) {
+    items.forEach((item, i) => {
+      item.classList.toggle('active', i === this._searchIndex);
+    });
+    if (items[this._searchIndex]) {
+      items[this._searchIndex].scrollIntoView({ block: 'nearest' });
+    }
+  },
+
+  // -- Helpers -------------------------------------------------------------
+
+  _showWelcome() {
+    const html = '<div class="welcome">'
+      + '<img class="welcome-logo" src="img/logo.png" alt="POTATO">'
+      + '<h1 class="welcome-title">POTATO</h1>'
+      + '<p class="welcome-sub">Abre un vault con <kbd>Ctrl+O</kbd> o clona un repo desde el menu.</p>'
+      + '<div class="welcome-shortcuts">'
+      + '<div class="welcome-row"><kbd>Ctrl+O</kbd><span>Abrir vault</span></div>'
+      + '<div class="welcome-row"><kbd>Ctrl+N</kbd><span>Nueva nota</span></div>'
+      + '<div class="welcome-row"><kbd>Ctrl+S</kbd><span>Guardar</span></div>'
+      + '<div class="welcome-row"><kbd>Ctrl+Shift+S</kbd><span>Sync con GitHub</span></div>'
+      + '<div class="welcome-row"><kbd>Ctrl+E</kbd><span>Edit / Read</span></div>'
+      + '<div class="welcome-row"><kbd>Ctrl+B</kbd><span>Toggle sidebar</span></div>'
+      + '<div class="welcome-row"><kbd>Ctrl+P</kbd><span>Buscar</span></div>'
+      + '</div>'
+      + '<p class="welcome-credit">Developed by JemXiaoLong</p>'
+      + '</div>';
+
+    // Mostrar directamente en preview sin pasar por markdown
+    const preview = document.getElementById('preview');
+    preview.innerHTML = html;
+
+    Editor.hide();
+    Preview.show();
   },
 };
 
