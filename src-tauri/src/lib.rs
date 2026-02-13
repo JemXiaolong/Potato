@@ -1,5 +1,5 @@
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Read as IoRead;
 use std::path::PathBuf;
@@ -440,6 +440,152 @@ fn pick_folder() -> Option<String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
+// -- Comandos: Search --------------------------------------------------------
+
+#[derive(Serialize, Clone)]
+pub struct SearchResult {
+    path: String,
+    name: String,
+    match_type: String,  // "name" or "content"
+    preview: String,     // snippet with context
+    line: u32,           // line number (0 for name matches)
+}
+
+#[tauri::command]
+async fn search_vault(path: String, query: String) -> Result<Vec<SearchResult>, String> {
+    tokio::task::spawn_blocking(move || {
+        let query_lower = query.to_lowercase();
+        let mut results = Vec::new();
+        search_dir(&PathBuf::from(&path), &query_lower, &mut results);
+        // Name matches first, then content matches
+        results.sort_by(|a, b| {
+            let type_ord = if a.match_type == "name" { 0u8 } else { 1 };
+            let type_ord_b = if b.match_type == "name" { 0u8 } else { 1 };
+            type_ord.cmp(&type_ord_b).then(a.name.cmp(&b.name))
+        });
+        // Limit results
+        results.truncate(50);
+        Ok(results)
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+fn search_dir(dir: &PathBuf, query: &str, results: &mut Vec<SearchResult>) {
+    let Ok(read_dir) = fs::read_dir(dir) else { return };
+
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        if name.starts_with('.') {
+            continue;
+        }
+
+        if path.is_dir() {
+            search_dir(&path, query, results);
+        } else if path.extension().is_some_and(|e| e == "md") {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+
+            // Match file name
+            if stem.to_lowercase().contains(query) {
+                results.push(SearchResult {
+                    path: path.to_string_lossy().to_string(),
+                    name: stem.clone(),
+                    match_type: "name".to_string(),
+                    preview: String::new(),
+                    line: 0,
+                });
+            }
+
+            // Match content
+            if let Ok(content) = fs::read_to_string(&path) {
+                for (i, line_text) in content.lines().enumerate() {
+                    if line_text.to_lowercase().contains(query) {
+                        let preview = line_text.trim().chars().take(120).collect::<String>();
+                        results.push(SearchResult {
+                            path: path.to_string_lossy().to_string(),
+                            name: stem.clone(),
+                            match_type: "content".to_string(),
+                            preview,
+                            line: (i + 1) as u32,
+                        });
+                        // Max 3 content matches per file
+                        if results.iter().filter(|r| r.path == path.to_string_lossy().to_string() && r.match_type == "content").count() >= 3 {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// -- Comandos: Session -------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Session {
+    vault_path: Option<String>,
+    note_path: Option<String>,
+    note_title: Option<String>,
+}
+
+fn session_path() -> PathBuf {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".config"));
+    config_dir.join("potato")
+}
+
+#[tauri::command]
+fn save_session(vault_path: Option<String>, note_path: Option<String>, note_title: Option<String>) -> Result<(), String> {
+    let dir = session_path();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let session = Session { vault_path, note_path, note_title };
+    let json = serde_json::to_string_pretty(&session).map_err(|e| e.to_string())?;
+    fs::write(dir.join("session.json"), json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_session() -> Option<Session> {
+    let path = session_path().join("session.json");
+    let content = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+// -- Comandos: Archivos ------------------------------------------------------
+
+#[tauri::command]
+fn move_file(from: String, to_dir: String) -> Result<String, String> {
+    let from_path = PathBuf::from(&from);
+
+    if !from_path.exists() {
+        return Err(format!("El archivo no existe: {}", from));
+    }
+
+    let file_name = from_path
+        .file_name()
+        .ok_or("No se pudo obtener el nombre del archivo")?
+        .to_string_lossy()
+        .to_string();
+
+    let dest_dir = PathBuf::from(&to_dir);
+    if !dest_dir.is_dir() {
+        return Err(format!("La carpeta destino no existe: {}", to_dir));
+    }
+
+    let dest_path = dest_dir.join(&file_name);
+
+    if dest_path.exists() {
+        return Err(format!("Ya existe '{}' en la carpeta destino", file_name));
+    }
+
+    fs::rename(&from_path, &dest_path)
+        .map_err(|e| format!("Error al mover archivo: {}", e))?;
+
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
 // -- Comandos: Sistema -------------------------------------------------------
 
 #[tauri::command]
@@ -470,7 +616,11 @@ pub fn run() {
             git_commit,
             git_push,
             pick_folder,
+            move_file,
             open_in_explorer,
+            search_vault,
+            save_session,
+            load_session,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");

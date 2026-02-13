@@ -5,10 +5,43 @@ const Sidebar = {
   _container: null,
   _activeItem: null,
   _onSelect: null,
+  _onDrop: null,
+  _dragData: null,  // { path, name } of file being dragged
 
-  init(containerId, onSelect) {
+  init(containerId, onSelect, onDrop) {
     this._container = document.getElementById(containerId);
     this._onSelect = onSelect;
+    this._onDrop = onDrop;
+
+    // Allow dropping on the root (sidebar-tree container)
+    this._container.addEventListener('dragover', (e) => {
+      // Only allow if dragging over the container itself, not a child dir
+      if (e.target === this._container || e.target.classList.contains('sidebar-empty')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        this._container.classList.add('drag-over-root');
+      }
+    });
+
+    this._container.addEventListener('dragleave', (e) => {
+      if (e.target === this._container || e.target.classList.contains('sidebar-empty')) {
+        this._container.classList.remove('drag-over-root');
+      }
+    });
+
+    this._container.addEventListener('drop', (e) => {
+      this._container.classList.remove('drag-over-root');
+      if (!this._dragData) return;
+      // Only handle drops on the container itself (root level)
+      if (e.target !== this._container && !e.target.classList.contains('sidebar-empty')) return;
+      e.preventDefault();
+
+      if (this._onDrop) {
+        // vault root path = container parent's vault path
+        this._onDrop(this._dragData.path, this._dragData.name, null);
+      }
+      this._dragData = null;
+    });
   },
 
   render(entries) {
@@ -95,8 +128,10 @@ const Sidebar = {
 
     parent.appendChild(item);
 
+    let children = null;
+
     if (entry.children && entry.children.length > 0) {
-      const children = document.createElement('div');
+      children = document.createElement('div');
       children.className = 'tree-children';
       this._renderEntries(entry.children, children, depth + 1);
       parent.appendChild(children);
@@ -105,17 +140,80 @@ const Sidebar = {
       item.classList.add('collapsed');
       children.classList.add('hidden');
 
-      item.addEventListener('click', () => {
+      item.addEventListener('click', (e) => {
+        // Don't toggle if the click was from a drop event area
+        if (e.target.closest('.tree-item') !== item) return;
         item.classList.toggle('collapsed');
         children.classList.toggle('hidden');
       });
     }
+
+    // -- Drop target for directories --
+    this._setupDropTarget(item, entry, children);
+  },
+
+  _setupDropTarget(item, entry, childrenEl) {
+    let expandTimeout = null;
+
+    item.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      item.classList.add('drag-over');
+
+      // Auto-expand collapsed folders after hovering 600ms
+      if (childrenEl && item.classList.contains('collapsed')) {
+        if (!expandTimeout) {
+          expandTimeout = setTimeout(() => {
+            item.classList.remove('collapsed');
+            childrenEl.classList.remove('hidden');
+          }, 600);
+        }
+      }
+    });
+
+    item.addEventListener('dragleave', (e) => {
+      // Only remove if we're actually leaving this item
+      if (!item.contains(e.relatedTarget) || e.relatedTarget === item) {
+        item.classList.remove('drag-over');
+      }
+      if (expandTimeout) {
+        clearTimeout(expandTimeout);
+        expandTimeout = null;
+      }
+    });
+
+    item.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      item.classList.remove('drag-over');
+
+      if (expandTimeout) {
+        clearTimeout(expandTimeout);
+        expandTimeout = null;
+      }
+
+      if (!this._dragData) return;
+
+      // Don't drop on the same parent directory
+      const filePath = this._dragData.path;
+      const fileDir = filePath.substring(0, filePath.lastIndexOf('/'));
+      if (fileDir === entry.path) return;
+
+      if (this._onDrop) {
+        this._onDrop(this._dragData.path, this._dragData.name, entry.path);
+      }
+      this._dragData = null;
+    });
   },
 
   _renderFile(entry, parent, depth) {
     const item = document.createElement('div');
     item.className = 'tree-item';
     item.dataset.path = entry.path;
+
+    // Make file draggable
+    item.draggable = true;
 
     const icon = document.createElement('span');
     icon.className = 'tree-icon';
@@ -135,6 +233,23 @@ const Sidebar = {
       if (this._onSelect) {
         this._onSelect(entry.path, entry.name);
       }
+    });
+
+    // Drag events
+    item.addEventListener('dragstart', (e) => {
+      this._dragData = { path: entry.path, name: entry.name };
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', entry.path);
+      // Visual feedback
+      requestAnimationFrame(() => item.classList.add('dragging'));
+    });
+
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      this._dragData = null;
+      // Clean up any lingering drag-over states
+      this._container.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      this._container.classList.remove('drag-over-root');
     });
 
     parent.appendChild(item);

@@ -17,7 +17,8 @@
       <span class="sync-icon">&#8635;</span>
       <span class="sync-label" id="sync-label">Sync</span>
     </button>
-    <div class="mode-toggle" id="mode-toggle">
+    <button class="close-note-btn hidden" id="close-note-btn" title="Cerrar nota">&times;</button>
+    <div class="mode-toggle hidden" id="mode-toggle">
       <button class="toggle-btn" data-mode="edit">Edit</button>
       <button class="toggle-btn active" data-mode="read">Read</button>
     </div>
@@ -53,6 +54,58 @@
     <div class="menu-item" id="menu-settings">
       <span class="menu-icon">&#9675;</span>
       <span>Ajustes</span>
+    </div>
+  </div>
+
+  <!-- New Note Modal -->
+  <div class="modal-overlay" id="newnote-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Nueva nota</span>
+        <button class="modal-close" id="newnote-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="sync-step">
+          <div class="sync-step-label">Nombre de la nota:</div>
+          <input type="text" class="sync-input" id="newnote-input" placeholder="Mi nueva nota" spellcheck="false" autocomplete="off">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn secondary" id="newnote-btn-cancel">Cancelar</button>
+        <button class="modal-btn primary" id="newnote-btn-action">Crear</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clone Modal -->
+  <div class="modal-overlay" id="clone-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Clonar repositorio</span>
+        <button class="modal-close" id="clone-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="sync-step">
+          <div class="sync-step-label">SSH del repositorio:</div>
+          <input type="text" class="sync-input" id="clone-url-input" placeholder="git@github.com:usuario/mi-vault.git" spellcheck="false" autocomplete="off">
+          <div class="clone-hint">Copia el SSH desde tu repositorio en GitHub.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn secondary" id="clone-btn-cancel">Cancelar</button>
+        <button class="modal-btn primary" id="clone-btn-action">Clonar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search palette -->
+  <div class="search-overlay" id="search-overlay">
+    <div class="search-palette">
+      <div class="search-input-wrap">
+        <span class="search-icon">&#9906;</span>
+        <input type="text" class="search-input" id="search-input" placeholder="Buscar notas y contenido..." autocomplete="off" spellcheck="false">
+      </div>
+      <div class="search-results" id="search-results"></div>
     </div>
   </div>
 
@@ -125,6 +178,55 @@
       <div class="modal-footer" id="sync-modal-footer">
         <button class="modal-btn secondary" id="sync-btn-cancel">Cancelar</button>
         <button class="modal-btn primary" id="sync-btn-action">Continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal (placeholder) -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Ajustes</span>
+        <button class="modal-close" id="settings-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-soon">
+          <div class="settings-soon-icon">&#9675;</div>
+          <div class="settings-soon-title">Proximamente</div>
+          <div class="settings-soon-list">
+            <div class="settings-soon-item">Tema claro / oscuro</div>
+            <div class="settings-soon-item">Tamano de fuente</div>
+            <div class="settings-soon-item">Auto-guardado</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn primary" id="settings-btn-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Move File Confirmation Modal -->
+  <div class="modal-overlay" id="move-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Mover archivo</span>
+        <button class="modal-close" id="move-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="move-confirm-msg">
+          <div class="move-confirm-icon">&#8623;</div>
+          <div class="move-confirm-text">
+            <span>Mover</span>
+            <strong id="move-file-name"></strong>
+            <span>a la carpeta</span>
+            <strong id="move-dest-name"></strong>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn secondary" id="move-btn-cancel">Cancelar</button>
+        <button class="modal-btn primary" id="move-btn-action">Mover</button>
       </div>
     </div>
   </div>
