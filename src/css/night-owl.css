@@ -1,0 +1,131 @@
+/* Night Owl theme for highlight.js - Based on Sarah Drasner's Night Owl VS Code theme */
+
+.hljs {
+  background: #011627;
+  color: #d6deeb;
+}
+
+/* Comments */
+.hljs-comment,
+.hljs-quote {
+  color: #637777;
+  font-style: italic;
+}
+
+/* Keywords: if, else, return, function, const, let, var, import, export */
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-type {
+  color: #c792ea;
+}
+
+/* Strings */
+.hljs-string,
+.hljs-template-tag,
+.hljs-template-variable {
+  color: #ecc48d;
+}
+
+/* Numbers */
+.hljs-number,
+.hljs-literal {
+  color: #F78C6C;
+}
+
+/* Functions / Methods */
+.hljs-title,
+.hljs-title.function_ {
+  color: #82AAFF;
+}
+
+/* Variables */
+.hljs-variable,
+.hljs-params {
+  color: #d6deeb;
+}
+
+/* Operators */
+.hljs-operator {
+  color: #7fdbca;
+}
+
+/* Types / Classes */
+.hljs-title.class_,
+.hljs-built_in {
+  color: #ffcb8b;
+}
+
+/* Properties / Attributes */
+.hljs-attr,
+.hljs-property,
+.hljs-attribute {
+  color: #80CBC4;
+}
+
+/* Booleans, null, undefined */
+.hljs-literal {
+  color: #ff5874;
+}
+
+/* Regex */
+.hljs-regexp {
+  color: #5ca7e4;
+}
+
+/* HTML/XML tags */
+.hljs-tag {
+  color: #caece6;
+}
+
+.hljs-name {
+  color: #caece6;
+}
+
+/* Punctuation, brackets */
+.hljs-punctuation {
+  color: #d6deeb;
+}
+
+/* Meta / preprocessor */
+.hljs-meta,
+.hljs-meta .hljs-keyword {
+  color: #82AAFF;
+}
+
+/* Deletion (diff) */
+.hljs-deletion {
+  color: #ef5350;
+  background: rgba(239, 83, 80, 0.1);
+}
+
+/* Addition (diff) */
+.hljs-addition {
+  color: #addb67;
+  background: rgba(173, 219, 103, 0.1);
+}
+
+/* Section headers */
+.hljs-section {
+  color: #82AAFF;
+  font-weight: 700;
+}
+
+/* Symbol / bullet */
+.hljs-symbol,
+.hljs-bullet {
+  color: #addb67;
+}
+
+/* Link */
+.hljs-link {
+  color: #82AAFF;
+  text-decoration: underline;
+}
+
+/* Emphasis / Strong */
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 700;
+}

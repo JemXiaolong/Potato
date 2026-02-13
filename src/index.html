@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POTATO</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/night-owl.css">
+</head>
+<body>
+  <!-- Toolbar -->
+  <header class="toolbar">
+    <button class="menu-btn" id="menu-btn" title="Menu">&#9776;</button>
+    <span class="toolbar-title" id="note-title"></span>
+    <div class="toolbar-spacer"></div>
+    <button class="sync-btn hidden" id="sync-btn" title="Sincronizar con GitHub">
+      <span class="sync-icon">&#8635;</span>
+      <span class="sync-label" id="sync-label">Sync</span>
+    </button>
+    <div class="mode-toggle" id="mode-toggle">
+      <button class="toggle-btn" data-mode="edit">Edit</button>
+      <button class="toggle-btn active" data-mode="read">Read</button>
+    </div>
+  </header>
+
+  <!-- Dropdown Menu -->
+  <div class="menu-dropdown" id="menu-dropdown">
+    <div class="menu-item" id="menu-open-vault">
+      <span class="menu-icon">&#9707;</span>
+      <span>Abrir vault</span>
+      <span class="menu-shortcut">Ctrl+O</span>
+    </div>
+    <div class="menu-item" id="menu-new-note">
+      <span class="menu-icon">&#43;</span>
+      <span>Nueva nota</span>
+      <span class="menu-shortcut">Ctrl+N</span>
+    </div>
+    <div class="menu-separator"></div>
+    <div class="menu-item" id="menu-github">
+      <span class="menu-icon">&#8595;</span>
+      <span>Clonar repositorio GitHub</span>
+    </div>
+    <div class="menu-item" id="menu-sync">
+      <span class="menu-icon">&#8645;</span>
+      <span>Sincronizar</span>
+      <span class="menu-shortcut">Ctrl+Shift+S</span>
+    </div>
+    <div class="menu-item" id="menu-open-folder">
+      <span class="menu-icon">&#8599;</span>
+      <span>Abrir en explorador</span>
+    </div>
+    <div class="menu-separator"></div>
+    <div class="menu-item" id="menu-settings">
+      <span class="menu-icon">&#9675;</span>
+      <span>Ajustes</span>
+    </div>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="progress-bar" id="progress-bar">
+    <div class="progress-fill" id="progress-fill"></div>
+    <span class="progress-text" id="progress-text"></span>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-resize" id="sidebar-resize"></div>
+    <div class="sidebar-header" id="vault-name">VAULT</div>
+    <div class="sidebar-tree" id="file-tree">
+      <div class="sidebar-empty">Ctrl+O para abrir un vault</div>
+    </div>
+  </aside>
+
+  <!-- Content: Editor -->
+  <main class="content">
+    <textarea
+      class="editor"
+      id="editor"
+      spellcheck="false"
+      placeholder="Escribe algo..."
+    ></textarea>
+    <div class="preview" id="preview"></div>
+  </main>
+
+  <!-- Status bar -->
+  <footer class="statusbar">
+    <span id="status-text">Ctrl+O para abrir un vault</span>
+    <span class="statusbar-spacer"></span>
+    <span class="statusbar-credit">by JemXiaoLong</span>
+  </footer>
+
+  <!-- Sync Modal -->
+  <div class="modal-overlay" id="sync-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Sincronizar</span>
+        <button class="modal-close" id="sync-modal-close">&times;</button>
+      </div>
+      <div class="modal-body" id="sync-modal-body">
+        <!-- Step 1: Pull status -->
+        <div class="sync-step" id="sync-step-pull">
+          <div class="sync-step-icon">&#8635;</div>
+          <div class="sync-step-text">Descargando cambios...</div>
+        </div>
+        <!-- Step 2: File list -->
+        <div class="sync-step hidden" id="sync-step-files">
+          <div class="sync-step-label">Archivos con cambios locales:</div>
+          <div class="sync-file-actions">
+            <button class="sync-select-btn" id="sync-select-all">Todos</button>
+            <button class="sync-select-btn" id="sync-select-none">Ninguno</button>
+          </div>
+          <div class="sync-file-list" id="sync-file-list"></div>
+        </div>
+        <!-- Step 3: Commit message -->
+        <div class="sync-step hidden" id="sync-step-commit">
+          <div class="sync-step-label">Mensaje del commit:</div>
+          <input type="text" class="sync-input" id="sync-commit-msg" placeholder="Describe tus cambios...">
+        </div>
+        <!-- Step 4: Result -->
+        <div class="sync-step hidden" id="sync-step-result">
+          <div class="sync-step-icon" id="sync-result-icon">&#10003;</div>
+          <div class="sync-step-text" id="sync-result-text">Sincronizado</div>
+        </div>
+      </div>
+      <div class="modal-footer" id="sync-modal-footer">
+        <button class="modal-btn secondary" id="sync-btn-cancel">Cancelar</button>
+        <button class="modal-btn primary" id="sync-btn-action">Continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/vendor/marked.min.js"></script>
+  <script src="js/vendor/highlight.min.js"></script>
+  <script src="js/wikilinks.js"></script>
+  <script src="js/sidebar.js"></script>
+  <script src="js/editor.js"></script>
+  <script src="js/preview.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

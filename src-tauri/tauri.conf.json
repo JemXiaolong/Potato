@@ -1,0 +1,37 @@
+{
+  "productName": "POTATO",
+  "version": "0.1.0",
+  "identifier": "com.potato.app",
+  "build": {
+    "frontendDist": "../src"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "POTATO",
+        "width": 1200,
+        "height": 750,
+        "resizable": true,
+        "minWidth": 800,
+        "minHeight": 500
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [],
+        "section": "editors"
+      }
+    }
+  }
+}
