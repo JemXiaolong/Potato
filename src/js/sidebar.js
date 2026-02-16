@@ -50,8 +50,28 @@ const Sidebar = {
   },
 
   render(entries) {
+    // Save expanded directories before re-render
+    const expanded = new Set();
+    this._container.querySelectorAll('.tree-item.dir:not(.collapsed)').forEach(el => {
+      if (el.dataset.path) expanded.add(el.dataset.path);
+    });
+
     this._container.innerHTML = '';
     this._renderEntries(entries, this._container, 0);
+
+    // Restore expanded directories
+    if (expanded.size > 0) {
+      expanded.forEach(path => {
+        const item = this._container.querySelector(`.tree-item.dir[data-path="${CSS.escape(path)}"]`);
+        if (item && item.classList.contains('collapsed')) {
+          item.classList.remove('collapsed');
+          const children = item.nextElementSibling;
+          if (children && children.classList.contains('tree-children')) {
+            children.classList.remove('hidden');
+          }
+        }
+      });
+    }
   },
 
   clear() {

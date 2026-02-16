@@ -13,15 +13,26 @@
     <button class="menu-btn" id="menu-btn" title="Menu">&#9776;</button>
     <span class="toolbar-title" id="note-title"></span>
     <div class="toolbar-spacer"></div>
-    <button class="sync-btn hidden" id="sync-btn" title="Sincronizar con GitHub">
-      <span class="sync-icon">&#8635;</span>
-      <span class="sync-label" id="sync-label">Sync</span>
-    </button>
+    <div class="toolbar-search" id="toolbar-search">
+      <span class="toolbar-search-icon">&#9906;</span>
+      <input type="text" class="toolbar-search-input" id="toolbar-search-input" placeholder="Buscar..." autocomplete="off" spellcheck="false">
+      <kbd class="toolbar-search-hint">Ctrl+P</kbd>
+    </div>
+    <div class="font-size-controls hidden" id="font-size-controls">
+      <button class="font-size-btn" id="font-size-down" title="Reducir fuente">&#8722;</button>
+      <span class="font-size-label" id="font-size-label">14</span>
+      <button class="font-size-btn" id="font-size-up" title="Aumentar fuente">&#43;</button>
+    </div>
+    <button class="split-btn hidden" id="split-btn" title="Vista dividida"><svg width="16" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="12" rx="1.5"/><line x1="8" y1="1" x2="8" y2="13"/></svg></button>
     <button class="close-note-btn hidden" id="close-note-btn" title="Cerrar nota">&times;</button>
     <div class="mode-toggle hidden" id="mode-toggle">
       <button class="toggle-btn" data-mode="edit">Edit</button>
       <button class="toggle-btn active" data-mode="read">Read</button>
     </div>
+    <button class="sync-btn hidden" id="sync-btn" title="Sincronizar con GitHub">
+      <span class="sync-icon">&#8635;</span>
+      <span class="sync-label" id="sync-label">Sync</span>
+    </button>
   </header>
 
   <!-- Dropdown Menu -->
@@ -133,6 +144,10 @@
       placeholder="Escribe algo..."
     ></textarea>
     <div class="preview" id="preview"></div>
+    <aside class="toc-panel hidden" id="toc-panel">
+      <div class="toc-header">Indice</div>
+      <nav class="toc-list" id="toc-list"></nav>
+    </aside>
   </main>
 
   <!-- Status bar -->
@@ -201,14 +216,32 @@
               <span class="switch-slider"></span>
             </label>
           </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Auto-guardado</span>
+              <span class="settings-row-desc">Guardar automaticamente al dejar de escribir</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setting-autosave" checked>
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Indice de nota</span>
+              <span class="settings-row-desc">Mostrar tabla de contenido con los encabezados</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setting-toc">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
         </div>
         <div class="settings-soon">
           <div class="settings-soon-icon">&#9675;</div>
           <div class="settings-soon-title">Proximamente</div>
           <div class="settings-soon-list">
             <div class="settings-soon-item">Tema claro / oscuro</div>
-            <div class="settings-soon-item">Tamano de fuente</div>
-            <div class="settings-soon-item">Auto-guardado</div>
           </div>
         </div>
       </div>
