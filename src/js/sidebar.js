@@ -7,6 +7,7 @@ const Sidebar = {
   _onSelect: null,
   _onDrop: null,
   _dragData: null,  // { path, name } of file being dragged
+  _changedPaths: new Set(),  // absolute paths of unsynced files
 
   init(containerId, onSelect, onDrop) {
     this._container = document.getElementById(containerId);
@@ -44,6 +45,10 @@ const Sidebar = {
     });
   },
 
+  setChangedFiles(absolutePaths) {
+    this._changedPaths = new Set(absolutePaths);
+  },
+
   render(entries) {
     this._container.innerHTML = '';
     this._renderEntries(entries, this._container, 0);
@@ -79,6 +84,18 @@ const Sidebar = {
     return clean;
   },
 
+  // Check if any file in entries (recursive) is unsynced
+  _hasUnsyncedFiles(entries) {
+    for (const entry of entries) {
+      if (entry.is_dir && entry.children) {
+        if (this._hasUnsyncedFiles(entry.children)) return true;
+      } else if (!entry.is_dir && this._changedPaths.has(entry.path)) {
+        return true;
+      }
+    }
+    return false;
+  },
+
   // Count total files (recursive)
   _countFiles(entries) {
     let count = 0;
@@ -103,8 +120,10 @@ const Sidebar = {
   },
 
   _renderDir(entry, parent, depth) {
+    const dirHasUnsynced = entry.children && this._hasUnsyncedFiles(entry.children);
+
     const item = document.createElement('div');
-    item.className = 'tree-item dir';
+    item.className = 'tree-item dir' + (dirHasUnsynced ? ' unsynced' : '');
     item.dataset.path = entry.path;
 
     const icon = document.createElement('span');
@@ -208,8 +227,10 @@ const Sidebar = {
   },
 
   _renderFile(entry, parent, depth) {
+    const isUnsynced = this._changedPaths.has(entry.path);
+
     const item = document.createElement('div');
-    item.className = 'tree-item';
+    item.className = 'tree-item' + (isUnsynced ? ' unsynced' : '');
     item.dataset.path = entry.path;
 
     // Make file draggable
@@ -217,13 +238,21 @@ const Sidebar = {
 
     const icon = document.createElement('span');
     icon.className = 'tree-icon';
-    icon.textContent = '\u25CB'; // ○
+    icon.textContent = isUnsynced ? '\u25CF' : '\u25CB'; // ● vs ○
     item.appendChild(icon);
 
     const label = document.createElement('span');
     label.className = 'tree-label';
     label.textContent = this._cleanName(entry.name, false);
     item.appendChild(label);
+
+    // Sync badge for unsynced files
+    if (isUnsynced) {
+      const badge = document.createElement('span');
+      badge.className = 'tree-sync-badge';
+      badge.textContent = 'sync';
+      item.appendChild(badge);
+    }
 
     // Tooltip with full name
     item.title = entry.name;

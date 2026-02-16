@@ -121,9 +121,6 @@ const App = {
   async _loadVault(path) {
     this.state.vaultPath = path;
 
-    const entries = await this.invoke('list_vault', { path });
-    Sidebar.render(entries);
-
     // UI updates
     const name = path.split('/').pop();
     document.getElementById('vault-name').textContent = name.toUpperCase();
@@ -135,8 +132,13 @@ const App = {
     Preview.clear();
     this.state.currentNote = null;
 
-    // Check git status
+    // Check git status and changed files BEFORE rendering
     await this._checkGitStatus();
+    await this._updateChangedFiles();
+
+    // Render sidebar with unsynced indicators already set
+    const entries = await this.invoke('list_vault', { path });
+    Sidebar.render(entries);
 
     // Guardar sesion
     this._saveSession();
@@ -144,6 +146,7 @@ const App = {
 
   async refreshVault() {
     if (!this.state.vaultPath) return;
+    await this._updateChangedFiles();
     const entries = await this.invoke('list_vault', { path: this.state.vaultPath });
     Sidebar.render(entries);
   },
@@ -222,6 +225,9 @@ const App = {
         this._setStatus(this.state.currentNote.title);
       }
     }, 1500);
+
+    // Update sync button indicator
+    this._checkGitStatus();
   },
 
   createNote() {
@@ -604,6 +610,7 @@ const App = {
     document.getElementById('sync-modal').classList.remove('open');
     this._syncState.step = 'idle';
     this._checkGitStatus();
+    this.refreshVault();
   },
 
   _syncShowStep(step) {
@@ -989,6 +996,23 @@ const App = {
       bar.classList.remove('active');
       fill.style.width = '0%';
     }, 800);
+  },
+
+  // -- Changed files (unsynced indicators) -----------------------------------
+
+  async _updateChangedFiles() {
+    if (!this.state.vaultPath || !this.state.gitLinked) {
+      Sidebar.setChangedFiles([]);
+      return;
+    }
+    try {
+      const files = await this.invoke('git_changed_files', { path: this.state.vaultPath });
+      const absolutePaths = files.map(f => this.state.vaultPath + '/' + f.path);
+      Sidebar.setChangedFiles(absolutePaths);
+    } catch (err) {
+      console.warn('Could not get changed files:', err);
+      Sidebar.setChangedFiles([]);
+    }
   },
 
   // -- Helpers -------------------------------------------------------------
