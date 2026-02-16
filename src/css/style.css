@@ -48,6 +48,7 @@
   --toolbar-h: 40px;
   --status-h: 26px;
   --sidebar-w: 240px;
+  --font-size: 14px;
 }
 
 /* === Reset === */
@@ -110,6 +111,65 @@ body.sidebar-hidden .sidebar {
 
 .toolbar-spacer {
   flex: 1;
+}
+
+/* Toolbar search */
+.toolbar-search {
+  display: flex;
+  align-items: center;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  height: 26px;
+  gap: 6px;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: text;
+}
+
+.toolbar-search:hover {
+  border-color: var(--border-light);
+}
+
+.toolbar-search:focus-within {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.toolbar-search-icon {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.toolbar-search-input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  width: 140px;
+  padding: 0;
+}
+
+.toolbar-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.toolbar-search-hint {
+  font-size: 9px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.toolbar-search:focus-within .toolbar-search-hint {
+  display: none;
 }
 
 /* Menu button */
@@ -428,6 +488,83 @@ mark {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* Font size controls */
+.font-size-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.font-size-controls.hidden {
+  display: none;
+}
+
+.font-size-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+  line-height: 1;
+}
+
+.font-size-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.font-size-btn:active {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.font-size-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  min-width: 26px;
+  text-align: center;
+  user-select: none;
+}
+
+/* Split view button */
+.split-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.split-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.split-btn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.split-btn.hidden {
+  display: none;
 }
 
 /* Close note button */
@@ -859,6 +996,33 @@ mark {
   overflow: hidden;
 }
 
+/* Split view mode */
+.content.split-mode {
+  display: flex !important;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.content.split-mode .editor {
+  position: relative !important;
+  inset: auto !important;
+  width: 50% !important;
+  height: 100% !important;
+  border-right: 1px solid var(--border);
+  display: block !important;
+  flex-shrink: 0;
+}
+
+.content.split-mode .preview {
+  position: relative !important;
+  inset: auto !important;
+  width: 50% !important;
+  height: 100% !important;
+  display: block !important;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
 /* Editor */
 .editor {
   position: absolute;
@@ -872,7 +1036,7 @@ mark {
   resize: none;
   padding: 24px 32px;
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: var(--font-size);
   line-height: 1.7;
   tab-size: 4;
   -moz-tab-size: 4;
@@ -892,11 +1056,105 @@ mark {
   inset: 0;
   overflow-y: auto;
   padding: 24px 32px;
+  font-size: var(--font-size);
   display: none;
 }
 
 .preview.visible {
   display: block;
+}
+
+/* === TOC Panel === */
+.toc-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 200px;
+  height: 100%;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+}
+
+.toc-panel.hidden {
+  display: none;
+}
+
+.toc-header {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 14px 14px 10px;
+  flex-shrink: 0;
+}
+
+.toc-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 6px 12px;
+}
+
+.toc-list::-webkit-scrollbar {
+  width: 3px;
+}
+.toc-list::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 3px;
+}
+
+.toc-item {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all 0.1s ease;
+  border-left: 2px solid transparent;
+}
+
+.toc-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.toc-item.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.toc-item.h1 { padding-left: 8px; font-weight: 600; font-size: 12px; }
+.toc-item.h2 { padding-left: 16px; }
+.toc-item.h3 { padding-left: 24px; font-size: 10px; color: var(--text-muted); }
+.toc-item.h4 { padding-left: 32px; font-size: 10px; color: var(--text-muted); }
+
+.toc-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 8px 14px;
+}
+
+/* Adjust preview/editor when TOC is visible */
+.content.toc-visible .preview {
+  right: 200px;
+}
+
+.content.toc-visible.split-mode .preview {
+  width: calc(50% - 100px) !important;
+}
+
+.content.toc-visible.split-mode .editor {
+  width: calc(50% - 100px) !important;
 }
 
 .preview::-webkit-scrollbar {

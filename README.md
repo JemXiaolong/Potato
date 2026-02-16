@@ -44,6 +44,26 @@ ssh -T git@github.com  # Verificar conexion
 
 ## Instalacion
 
+### Desde .deb (usuarios)
+
+```bash
+sudo dpkg -i POTATO_0.4.0.deb
+```
+
+Si marca error de dependencias:
+
+```bash
+sudo apt --fix-broken install
+```
+
+Para desinstalar:
+
+```bash
+sudo dpkg -r potato
+```
+
+### Desde codigo fuente (desarrollo)
+
 ```bash
 git clone https://github.com/jemxiaolong/Potato.git
 cd Potato
@@ -67,14 +87,8 @@ npm run build
 ```
 
 Genera los instaladores en `src-tauri/target/release/bundle/`:
-- `deb/POTATO_0.1.0_amd64.deb`
-- `appimage/POTATO_0.1.0_amd64.AppImage`
-
-### Instalar .deb
-
-```bash
-sudo dpkg -i src-tauri/target/release/bundle/deb/POTATO_0.1.0_amd64.deb
-```
+- `deb/POTATO_0.4.0_amd64.deb`
+- `appimage/POTATO_0.4.0_amd64.AppImage`
 
 ## Atajos de teclado
 
@@ -85,7 +99,10 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/POTATO_0.1.0_amd64.deb
 | `Ctrl+S` | Guardar nota |
 | `Ctrl+Shift+S` | Sincronizar con Git |
 | `Ctrl+E` | Alternar Edit / Read |
+| `Ctrl+Shift+E` | Vista dividida (Split view) |
 | `Ctrl+B` | Mostrar / ocultar sidebar |
+| `Ctrl+P` | Buscar notas y contenido |
+| `Ctrl+W` | Cerrar nota |
 
 ## Funcionalidades
 
@@ -96,7 +113,26 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/POTATO_0.1.0_amd64.deb
 - Syntax highlighting con tema Night Owl
 - Frontmatter YAML renderizado como tarjeta visual
 - Sidebar redimensionable con carpetas colapsables
+- Busqueda instantanea por nombre y contenido
+- Drag & drop para mover archivos entre carpetas
+- Vista dividida (Split view): editor y preview lado a lado
+- Indicadores verdes de archivos sin sincronizar (configurable)
+- Indice de nota (tabla de contenido navegable por encabezados)
+- Auto-guardado al dejar de escribir (configurable)
+- Persistencia de sesion (recuerda vault y nota al reabrir)
 - Fuente Nunito integrada
+
+## Ajustes
+
+Accesibles desde el menu (☰ > Ajustes):
+
+| Opcion | Descripcion | Default |
+|--------|-------------|---------|
+| Indicadores de sync | Iluminar en verde archivos sin sincronizar | Activado |
+| Auto-guardado | Guardar automaticamente al dejar de escribir | Activado |
+| Indice de nota | Tabla de contenido con encabezados de la nota | Desactivado |
+
+Las preferencias se guardan en `localStorage` y persisten entre sesiones.
 
 ## Estructura del proyecto
 
@@ -107,6 +143,7 @@ Potato/
 │   │   ├── style.css       # Tema principal
 │   │   └── night-owl.css   # Tema para bloques de codigo
 │   ├── fonts/              # Nunito (4 pesos)
+│   ├── img/                # Logo y assets
 │   ├── js/
 │   │   ├── app.js          # Logica principal
 │   │   ├── editor.js       # Editor de texto

@@ -238,6 +238,25 @@ const Preview = {
 
     this._el.innerHTML = html;
     this._el.scrollTop = scrollTop;
+
+    // Add IDs to headings for TOC navigation
+    this._el.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((heading, i) => {
+      const slug = heading.textContent.trim().toLowerCase()
+        .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
+      heading.id = slug + '-' + i;
+    });
+  },
+
+  getHeadings() {
+    const headings = [];
+    this._el.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((heading) => {
+      headings.push({
+        id: heading.id,
+        text: heading.textContent.trim(),
+        level: parseInt(heading.tagName[1]),
+      });
+    });
+    return headings;
   },
 
   show() {

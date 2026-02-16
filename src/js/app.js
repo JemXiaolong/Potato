@@ -10,7 +10,12 @@ const App = {
     dirty: false,
     gitLinked: false,   // vault is a git repo with remote
     syncIndicators: true, // show unsynced file indicators
+    autosave: true,       // auto-save after typing stops
+    toc: false,           // show table of contents panel
   },
+
+  _autosaveTimeout: null,
+  _lastSavedContent: null,  // track content to detect external changes
 
   // Referencia a invoke de Tauri
   invoke: null,
@@ -34,6 +39,13 @@ const App = {
     Editor.init('editor', (content) => {
       this.state.dirty = true;
       Preview.update(content);
+      this._updateToc();
+
+      // Auto-save after 1.5s of inactivity
+      if (this.state.autosave) {
+        clearTimeout(this._autosaveTimeout);
+        this._autosaveTimeout = setTimeout(() => this.saveCurrentNote(), 1500);
+      }
     });
 
     Preview.init('preview', (target) => this.onWikilinkClick(target));
@@ -45,6 +57,13 @@ const App = {
     document.querySelectorAll('.toggle-btn').forEach((btn) => {
       btn.addEventListener('click', () => this.setMode(btn.dataset.mode));
     });
+
+    // Split view button
+    document.getElementById('split-btn').addEventListener('click', () => this.toggleSplit());
+
+    // Font size controls
+    document.getElementById('font-size-down').addEventListener('click', () => this._changeFontSize(-1));
+    document.getElementById('font-size-up').addEventListener('click', () => this._changeFontSize(1));
 
     // Menu dropdown
     this._initMenu();
@@ -61,11 +80,17 @@ const App = {
     // Listen for git progress events
     this._initProgressBar();
 
+    // Detect external changes on window focus
+    window.addEventListener('focus', () => this._onWindowFocus());
+
     // Search palette
     this._initSearch();
 
     // Load settings from localStorage
     this._loadSettings();
+
+    // Load font size preference
+    this._loadFontSize();
 
     // Restaurar sesion anterior
     await this._restoreSession();
@@ -166,6 +191,7 @@ const App = {
 
     this.state.currentNote = { path, title };
     this.state.dirty = false;
+    this._lastSavedContent = content;
 
     Editor.setValue(content);
     this._setTitle(title);
@@ -174,6 +200,8 @@ const App = {
     // Mostrar controles de nota
     document.getElementById('mode-toggle').classList.remove('hidden');
     document.getElementById('close-note-btn').classList.remove('hidden');
+    document.getElementById('split-btn').classList.remove('hidden');
+    document.getElementById('font-size-controls').classList.remove('hidden');
 
     // Sync editor/preview visibility with current mode
     this.setMode(this.state.mode);
@@ -189,12 +217,20 @@ const App = {
 
     this.state.currentNote = null;
     this.state.dirty = false;
+    this._lastSavedContent = null;
 
     // Ocultar controles de nota
     document.getElementById('mode-toggle').classList.add('hidden');
     document.getElementById('close-note-btn').classList.add('hidden');
+    document.getElementById('split-btn').classList.add('hidden');
+    document.getElementById('font-size-controls').classList.add('hidden');
 
-    // Limpiar editor y titulo
+    // Reset split mode, TOC, and clean up
+    const content = document.querySelector('.content');
+    content.classList.remove('split-mode');
+    content.classList.remove('toc-visible');
+    document.getElementById('toc-panel').classList.add('hidden');
+    this.state.mode = 'read';
     Editor.setValue('');
     Editor.hide();
     this._setTitle('');
@@ -212,10 +248,12 @@ const App = {
   async saveCurrentNote() {
     if (!this.state.currentNote || !this.state.dirty) return;
 
+    const content = Editor.getValue();
     await this.invoke('save_note', {
       path: this.state.currentNote.path,
-      content: Editor.getValue(),
+      content,
     });
+    this._lastSavedContent = content;
     this.state.dirty = false;
     this._setStatus('Guardado');
     setTimeout(() => {
@@ -312,25 +350,46 @@ const App = {
 
   setMode(mode) {
     this.state.mode = mode;
+    const content = document.querySelector('.content');
+    const splitBtn = document.getElementById('split-btn');
 
-    // Toggle buttons
+    // Toggle Edit/Read buttons
     document.querySelectorAll('.toggle-btn').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.mode === mode);
     });
 
+    // Split button state
+    splitBtn.classList.toggle('active', mode === 'split');
+
+    // Remove split mode class first
+    content.classList.remove('split-mode');
+
     if (mode === 'edit') {
       Editor.show();
       Preview.hide();
+      Editor.focus();
+    } else if (mode === 'split') {
+      content.classList.add('split-mode');
+      Preview.update(Editor.getValue());
+      Editor.show();
+      Preview.show();
       Editor.focus();
     } else {
       Preview.update(Editor.getValue());
       Editor.hide();
       Preview.show();
     }
+
+    // Update TOC after mode change
+    this._updateToc();
   },
 
   toggleMode() {
     this.setMode(this.state.mode === 'edit' ? 'read' : 'edit');
+  },
+
+  toggleSplit() {
+    this.setMode(this.state.mode === 'split' ? 'read' : 'split');
   },
 
   toggleSidebar() {
@@ -380,6 +439,10 @@ const App = {
         case 's':
           e.preventDefault();
           this.gitSync();
+          return;
+        case 'e':
+          e.preventDefault();
+          this.toggleSplit();
           return;
       }
     }
@@ -749,8 +812,84 @@ const App = {
     }
   },
 
+  // Extract a short topic description from file content
+  _extractTopic(content) {
+    // Try frontmatter fields: description, topic, titulo, title
+    const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      const fm = fmMatch[1];
+      for (const field of ['description', 'descripcion', 'topic', 'tema', 'title', 'titulo']) {
+        const re = new RegExp('^' + field + '\\s*:\\s*(.+)', 'mi');
+        const m = fm.match(re);
+        if (m) {
+          return m[1].trim().replace(/^["']|["']$/g, '');
+        }
+      }
+    }
+
+    // Try first heading
+    const headingMatch = content.match(/^#{1,3}\s+(.+)/m);
+    if (headingMatch) {
+      return headingMatch[1].trim();
+    }
+
+    // First non-empty line (skip frontmatter)
+    const body = fmMatch ? content.slice(fmMatch[0].length) : content;
+    const firstLine = body.split('\n').find(l => l.trim().length > 0);
+    if (firstLine) {
+      return firstLine.trim().slice(0, 60);
+    }
+
+    return null;
+  },
+
+  // Generate commit message from selected files content
+  async _generateCommitMessage() {
+    const selected = new Set(this._syncState.selectedFiles);
+    const files = this._syncState.changedFiles.filter(f => selected.has(f.path));
+
+    const groups = { add: [], update: [], delete: [] };
+
+    for (const f of files) {
+      let topic = null;
+
+      // Read content for non-deleted files
+      if (f.status_code !== 'D') {
+        try {
+          const absPath = this.state.vaultPath + '/' + f.path;
+          const content = await this.invoke('read_note', { path: absPath });
+          if (content) topic = this._extractTopic(content);
+        } catch (_) { /* ignore */ }
+      }
+
+      // Fallback to clean filename
+      if (!topic) {
+        topic = f.path.split('/').pop().replace(/\.md$/i, '');
+      }
+
+      // Lowercase first char for natural reading
+      topic = topic.charAt(0).toLowerCase() + topic.slice(1);
+
+      if (f.status_code === '?' || f.status_code === 'A') {
+        groups.add.push(topic);
+      } else if (f.status_code === 'D') {
+        groups.delete.push(topic);
+      } else {
+        groups.update.push(topic);
+      }
+    }
+
+    const parts = [];
+    if (groups.add.length) parts.push('add ' + groups.add.join(', '));
+    if (groups.update.length) parts.push('update ' + groups.update.join(', '));
+    if (groups.delete.length) parts.push('remove ' + groups.delete.join(', '));
+
+    const msg = parts.join('; ') || 'vault sync';
+    return '[DOC] ' + msg;
+  },
+
   // Step 3: Commit message
-  _syncStepCommit() {
+  async _syncStepCommit() {
     if (this._syncState.selectedFiles.length === 0) {
       this._closeSyncModal();
       return;
@@ -760,12 +899,15 @@ const App = {
     const input = document.getElementById('sync-commit-msg');
     const actionBtn = document.getElementById('sync-btn-action');
 
-    // Default message
-    const now = new Date();
-    const timestamp = now.toISOString().slice(0, 16).replace('T', ' ');
-    input.value = '';
-    input.placeholder = 'vault sync ' + timestamp;
+    // Auto-generate commit message from file contents
+    input.value = 'Generando mensaje...';
+    input.disabled = true;
+    const msg = await this._generateCommitMessage();
+    input.value = msg;
+    input.disabled = false;
+    input.placeholder = 'Describe tus cambios...';
     input.focus();
+    input.select();
 
     actionBtn.textContent = 'Subir cambios';
     actionBtn.disabled = false;
@@ -783,9 +925,7 @@ const App = {
   // Step 4: Stage, commit, push
   async _syncStepPush() {
     const input = document.getElementById('sync-commit-msg');
-    const now = new Date();
-    const timestamp = now.toISOString().slice(0, 16).replace('T', ' ');
-    const message = input.value.trim() || 'vault sync ' + timestamp;
+    const message = input.value.trim() || '[DOC] vault sync';
 
     this._syncShowStep('result');
     const icon = document.getElementById('sync-result-icon');
@@ -922,17 +1062,44 @@ const App = {
   },
 
   _loadSettings() {
-    const stored = localStorage.getItem('potato-sync-indicators');
-    this.state.syncIndicators = stored === null ? true : stored === 'true';
+    // Sync indicators
+    const storedSync = localStorage.getItem('potato-sync-indicators');
+    this.state.syncIndicators = storedSync === null ? true : storedSync === 'true';
 
-    // Sync toggle UI
-    const toggle = document.getElementById('setting-sync-indicators');
-    if (toggle) {
-      toggle.checked = this.state.syncIndicators;
-      toggle.addEventListener('change', () => {
-        this.state.syncIndicators = toggle.checked;
-        localStorage.setItem('potato-sync-indicators', toggle.checked);
+    const syncToggle = document.getElementById('setting-sync-indicators');
+    if (syncToggle) {
+      syncToggle.checked = this.state.syncIndicators;
+      syncToggle.addEventListener('change', () => {
+        this.state.syncIndicators = syncToggle.checked;
+        localStorage.setItem('potato-sync-indicators', syncToggle.checked);
         this.refreshVault();
+      });
+    }
+
+    // Auto-save
+    const storedAutosave = localStorage.getItem('potato-autosave');
+    this.state.autosave = storedAutosave === null ? true : storedAutosave === 'true';
+
+    const autosaveToggle = document.getElementById('setting-autosave');
+    if (autosaveToggle) {
+      autosaveToggle.checked = this.state.autosave;
+      autosaveToggle.addEventListener('change', () => {
+        this.state.autosave = autosaveToggle.checked;
+        localStorage.setItem('potato-autosave', autosaveToggle.checked);
+      });
+    }
+
+    // TOC (table of contents)
+    const storedToc = localStorage.getItem('potato-toc');
+    this.state.toc = storedToc === null ? false : storedToc === 'true';
+
+    const tocToggle = document.getElementById('setting-toc');
+    if (tocToggle) {
+      tocToggle.checked = this.state.toc;
+      tocToggle.addEventListener('change', () => {
+        this.state.toc = tocToggle.checked;
+        localStorage.setItem('potato-toc', tocToggle.checked);
+        this._updateToc();
       });
     }
   },
@@ -942,9 +1109,13 @@ const App = {
     const closeBtn = document.getElementById('settings-modal-close');
     const actionBtn = document.getElementById('settings-btn-close');
 
-    // Sync toggle state
-    const toggle = document.getElementById('setting-sync-indicators');
-    if (toggle) toggle.checked = this.state.syncIndicators;
+    // Sync toggle states with current values
+    const syncToggle = document.getElementById('setting-sync-indicators');
+    if (syncToggle) syncToggle.checked = this.state.syncIndicators;
+    const autosaveToggle = document.getElementById('setting-autosave');
+    if (autosaveToggle) autosaveToggle.checked = this.state.autosave;
+    const tocToggle = document.getElementById('setting-toc');
+    if (tocToggle) tocToggle.checked = this.state.toc;
 
     modal.classList.add('open');
 
@@ -1016,6 +1187,122 @@ const App = {
     }, 800);
   },
 
+  // -- Table of contents (TOC) -----------------------------------------------
+
+  _updateToc() {
+    const panel = document.getElementById('toc-panel');
+    const list = document.getElementById('toc-list');
+    const content = document.querySelector('.content');
+
+    if (!this.state.toc || !this.state.currentNote || this.state.mode === 'edit') {
+      panel.classList.add('hidden');
+      content.classList.remove('toc-visible');
+      return;
+    }
+
+    const headings = Preview.getHeadings();
+    if (headings.length === 0) {
+      panel.classList.add('hidden');
+      content.classList.remove('toc-visible');
+      return;
+    }
+
+    list.innerHTML = '';
+    for (const h of headings) {
+      const item = document.createElement('div');
+      item.className = 'toc-item h' + h.level;
+      item.textContent = h.text;
+      item.addEventListener('click', () => {
+        const target = document.getElementById(h.id);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+      list.appendChild(item);
+    }
+
+    panel.classList.remove('hidden');
+    content.classList.add('toc-visible');
+  },
+
+  // -- External change detection -----------------------------------------------
+
+  _focusCooldown: false,
+
+  async _onWindowFocus() {
+    if (!this.state.vaultPath || this._focusCooldown) return;
+
+    // Cooldown to avoid rapid repeated checks
+    this._focusCooldown = true;
+    setTimeout(() => { this._focusCooldown = false; }, 1000);
+
+    // Refresh sidebar (picks up new/deleted/renamed files)
+    await this.refreshVault();
+
+    // Check if current note was changed externally
+    if (!this.state.currentNote) return;
+
+    try {
+      const diskContent = await this.invoke('read_note', { path: this.state.currentNote.path });
+
+      if (diskContent === null) {
+        // File was deleted externally
+        this._setStatus('Nota eliminada externamente');
+        this.state.dirty = false;
+        this._lastSavedContent = null;
+        await this.closeNote();
+        return;
+      }
+
+      // Compare with last saved version (not editor, to detect external edits)
+      if (this._lastSavedContent !== null && diskContent !== this._lastSavedContent) {
+        if (!this.state.dirty) {
+          // No local changes: reload silently
+          Editor.setValue(diskContent);
+          this._lastSavedContent = diskContent;
+          Preview.update(diskContent);
+          this._updateToc();
+          this._setStatus('Nota recargada');
+          setTimeout(() => {
+            if (this.state.currentNote) this._setStatus(this.state.currentNote.title);
+          }, 2000);
+        } else {
+          // Has local unsaved changes: warn the user
+          this._setStatus('Cambio externo detectado (tienes cambios sin guardar)');
+        }
+      }
+    } catch (err) {
+      // File probably deleted
+      this._setStatus('Nota no encontrada');
+      this.state.dirty = false;
+      this._lastSavedContent = null;
+      await this.closeNote();
+    }
+  },
+
+  // -- Font size ---------------------------------------------------------------
+
+  _fontSize: 14,
+
+  _loadFontSize() {
+    const stored = localStorage.getItem('potato-font-size');
+    this._fontSize = stored ? parseInt(stored, 10) : 14;
+    this._applyFontSize();
+  },
+
+  _changeFontSize(delta) {
+    const newSize = Math.max(10, Math.min(24, this._fontSize + delta));
+    if (newSize === this._fontSize) return;
+    this._fontSize = newSize;
+    localStorage.setItem('potato-font-size', newSize);
+    this._applyFontSize();
+  },
+
+  _applyFontSize() {
+    document.documentElement.style.setProperty('--font-size', this._fontSize + 'px');
+    document.getElementById('font-size-label').textContent = this._fontSize;
+  },
+
   // -- Changed files (unsynced indicators) -----------------------------------
 
   async _updateChangedFiles() {
@@ -1051,19 +1338,20 @@ const App = {
   _initSearch() {
     const overlay = document.getElementById('search-overlay');
     const input = document.getElementById('search-input');
+    const toolbarInput = document.getElementById('toolbar-search-input');
 
     // Close on overlay click
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) this._closeSearch();
     });
 
-    // Search on input
+    // Search on input (palette)
     input.addEventListener('input', () => {
       clearTimeout(this._searchTimeout);
       this._searchTimeout = setTimeout(() => this._doSearch(), 200);
     });
 
-    // Keyboard navigation
+    // Keyboard navigation (palette)
     input.addEventListener('keydown', (e) => {
       const items = document.querySelectorAll('.search-result');
       if (e.key === 'ArrowDown') {
@@ -1079,22 +1367,61 @@ const App = {
         items[this._searchIndex].click();
       }
     });
+
+    // Toolbar search: open palette on input
+    toolbarInput.addEventListener('input', () => {
+      const query = toolbarInput.value;
+      if (!this.state.vaultPath) return;
+      if (!overlay.classList.contains('open')) {
+        this._openSearch(query);
+      } else {
+        input.value = query;
+        clearTimeout(this._searchTimeout);
+        this._searchTimeout = setTimeout(() => this._doSearch(), 200);
+      }
+    });
+
+    // Toolbar search: open palette on focus click
+    toolbarInput.addEventListener('focus', () => {
+      if (toolbarInput.value.length >= 2) {
+        this._openSearch(toolbarInput.value);
+      }
+    });
+
+    // Toolbar search: Escape to blur
+    toolbarInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        toolbarInput.blur();
+        toolbarInput.value = '';
+      }
+      if (e.key === 'Enter' && toolbarInput.value.trim().length >= 2) {
+        this._openSearch(toolbarInput.value);
+      }
+    });
   },
 
-  _openSearch() {
+  _openSearch(initialQuery) {
     if (!this.state.vaultPath) return;
     const overlay = document.getElementById('search-overlay');
     const input = document.getElementById('search-input');
     overlay.classList.add('open');
-    input.value = '';
+    input.value = initialQuery || '';
     input.focus();
     this._searchIndex = -1;
-    document.getElementById('search-results').innerHTML = '<div class="search-empty">Escribe para buscar...</div>';
+
+    if (initialQuery && initialQuery.length >= 2) {
+      this._doSearch();
+    } else {
+      document.getElementById('search-results').innerHTML = '<div class="search-empty">Escribe para buscar...</div>';
+    }
   },
 
   _closeSearch() {
     document.getElementById('search-overlay').classList.remove('open');
     document.getElementById('search-input').value = '';
+    const toolbarInput = document.getElementById('toolbar-search-input');
+    toolbarInput.value = '';
+    toolbarInput.blur();
   },
 
   async _doSearch() {
