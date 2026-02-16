@@ -623,6 +623,48 @@ mark {
   flex-shrink: 0;
 }
 
+/* Unsynced file indicators */
+.tree-item.unsynced .tree-icon {
+  color: #10b981;
+  opacity: 0.9;
+}
+
+.tree-item.unsynced .tree-label {
+  color: #10b981;
+}
+
+.tree-item.unsynced:hover .tree-label,
+.tree-item.unsynced:hover .tree-icon {
+  color: #34d399;
+}
+
+.tree-item.unsynced.active {
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.tree-item.unsynced.active .tree-label,
+.tree-item.unsynced.active .tree-icon {
+  color: #34d399;
+}
+
+/* Unsynced directory indicators */
+.tree-item.dir.unsynced .tree-badge {
+  color: #10b981;
+}
+
+.tree-sync-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /* Children indentation */
 .tree-children {
   padding-left: 10px;
