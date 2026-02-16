@@ -9,6 +9,7 @@ const App = {
     mode: 'read',       // 'edit' | 'read'
     dirty: false,
     gitLinked: false,   // vault is a git repo with remote
+    syncIndicators: true, // show unsynced file indicators
   },
 
   // Referencia a invoke de Tauri
@@ -62,6 +63,9 @@ const App = {
 
     // Search palette
     this._initSearch();
+
+    // Load settings from localStorage
+    this._loadSettings();
 
     // Restaurar sesion anterior
     await this._restoreSession();
@@ -167,19 +171,13 @@ const App = {
     this._setTitle(title);
     this._setStatus(title);
 
-    // Actualizar la vista activa
-    if (this.state.mode === 'read') {
-      Preview.update(content);
-    }
-
-    Sidebar.setActive(path);
-    if (this.state.mode === 'edit') {
-      Editor.focus();
-    }
-
     // Mostrar controles de nota
     document.getElementById('mode-toggle').classList.remove('hidden');
     document.getElementById('close-note-btn').classList.remove('hidden');
+
+    // Sync editor/preview visibility with current mode
+    this.setMode(this.state.mode);
+    Sidebar.setActive(path);
 
     // Guardar sesion
     this._saveSession();
@@ -923,10 +921,30 @@ const App = {
     }
   },
 
+  _loadSettings() {
+    const stored = localStorage.getItem('potato-sync-indicators');
+    this.state.syncIndicators = stored === null ? true : stored === 'true';
+
+    // Sync toggle UI
+    const toggle = document.getElementById('setting-sync-indicators');
+    if (toggle) {
+      toggle.checked = this.state.syncIndicators;
+      toggle.addEventListener('change', () => {
+        this.state.syncIndicators = toggle.checked;
+        localStorage.setItem('potato-sync-indicators', toggle.checked);
+        this.refreshVault();
+      });
+    }
+  },
+
   _showSettings() {
     const modal = document.getElementById('settings-modal');
     const closeBtn = document.getElementById('settings-modal-close');
     const actionBtn = document.getElementById('settings-btn-close');
+
+    // Sync toggle state
+    const toggle = document.getElementById('setting-sync-indicators');
+    if (toggle) toggle.checked = this.state.syncIndicators;
 
     modal.classList.add('open');
 
@@ -1001,7 +1019,7 @@ const App = {
   // -- Changed files (unsynced indicators) -----------------------------------
 
   async _updateChangedFiles() {
-    if (!this.state.vaultPath || !this.state.gitLinked) {
+    if (!this.state.vaultPath || !this.state.gitLinked || !this.state.syncIndicators) {
       Sidebar.setChangedFiles([]);
       return;
     }
