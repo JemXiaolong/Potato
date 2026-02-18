@@ -881,6 +881,31 @@ mark {
   color: var(--accent);
 }
 
+.settings-path-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.settings-path-input {
+  flex: 1;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  outline: none;
+  min-width: 0;
+}
+.settings-path-input:focus {
+  border-color: var(--accent);
+}
+.settings-path-input::placeholder {
+  color: var(--text-muted);
+}
+
 /* Toggle switch */
 .switch {
   position: relative;
