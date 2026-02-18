@@ -33,15 +33,49 @@ const Preview = {
       marked.use({ renderer });
     }
 
-    // Delegated click handler para wikilinks
+    // Delegated click handler para links
     this._el.addEventListener('click', (e) => {
-      const link = e.target.closest('a.wikilink');
-      if (link) {
-        e.preventDefault();
+      const link = e.target.closest('a');
+      if (!link) return;
+      e.preventDefault();
+
+      // Wikilinks internos
+      if (link.classList.contains('wikilink')) {
         const target = link.dataset.target;
         if (target && this._onWikilinkClick) {
           this._onWikilinkClick(target);
         }
+        return;
+      }
+
+      const href = link.getAttribute('href');
+      if (!href) return;
+
+      // Links externos → abrir en navegador del sistema
+      if (href.startsWith('http://') || href.startsWith('https://')) {
+        if (window.__TAURI__) {
+          window.__TAURI__.core.invoke('open_in_explorer', { path: href });
+        } else {
+          window.open(href, '_blank');
+        }
+        return;
+      }
+
+      // Links relativos → navegar a nota dentro del vault
+      if (App.state.currentNote && App.state.vaultPath) {
+        const noteDir = App.state.currentNote.path.replace(/[^/]+$/, '');
+        // Resolver ruta relativa
+        const parts = (noteDir + href).split('/');
+        const resolved = [];
+        for (const p of parts) {
+          if (p === '..') resolved.pop();
+          else if (p && p !== '.') resolved.push(p);
+        }
+        const fullPath = '/' + resolved.join('/');
+
+        // Extraer nombre sin extensión
+        const fileName = fullPath.split('/').pop().replace(/\.md$/, '');
+        App.openNote(fullPath, fileName);
       }
     });
   },

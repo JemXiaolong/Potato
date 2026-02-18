@@ -14,14 +14,17 @@ const Claude = {
     messages: [],
     isStreaming: false,
     installed: false,
-    model: 'claude-sonnet-4-5-20250929',
+    model: 'sonnet',
     workingDir: null,    // null = usa vault path (para agentes)
     projectDir: null,    // directorio del proyecto/código
     mode: 'vault',       // 'vault' o 'project'
     agents: [],          // agentes custom disponibles
+    commands: [],        // comandos custom disponibles
+    commandsDir: null,   // directorio de comandos custom
     allowedTools: ['Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch'],
     sessionApprovedTools: [],
     panelMode: 'closed', // 'closed', 'normal', 'minimized', 'maximized'
+    agentsOnly: false,   // true = pure router, false = hybrid
   },
 
   invoke: null,
@@ -112,6 +115,24 @@ const Claude = {
     });
     document.getElementById('setting-claude-projectdir-input').addEventListener('blur', () => this._setProjectDirFromInput());
 
+    // Agents only toggle - load saved preference
+    const savedAgentsOnly = localStorage.getItem('potato-claude-agents-only');
+    if (savedAgentsOnly === 'true') this.state.agentsOnly = true;
+
+    document.getElementById('setting-claude-agents-only').addEventListener('change', (e) => {
+      this.state.agentsOnly = e.target.checked;
+      localStorage.setItem('potato-claude-agents-only', e.target.checked);
+    });
+
+    // Commands directory - load saved + listeners
+    this.state.commandsDir = localStorage.getItem('potato-claude-commandsdir') || null;
+
+    document.getElementById('setting-claude-commandsdir-btn').addEventListener('click', () => this._pickCommandsDir());
+    document.getElementById('setting-claude-commandsdir-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); this._setCommandsDirFromInput(); }
+    });
+    document.getElementById('setting-claude-commandsdir-input').addEventListener('blur', () => this._setCommandsDirFromInput());
+
     // Input: Enter to send, Shift+Enter for newline, autocomplete nav
     this._inputEl.addEventListener('keydown', (e) => {
       // Autocomplete navigation
@@ -159,17 +180,37 @@ const Claude = {
 
     // Load agents
     this._loadAgents();
+    this._loadCommands();
   },
 
   async _checkInstalled() {
     try {
       await this.invoke('check_claude');
       this.state.installed = true;
-      // Show toggle button
       document.getElementById('claude-toggle-btn').classList.remove('hidden');
     } catch (_) {
       this.state.installed = false;
+      // Show toggle anyway so user can see the install instructions
+      document.getElementById('claude-toggle-btn').classList.remove('hidden');
+      this._showNotInstalledBanner();
     }
+  },
+
+  _showNotInstalledBanner() {
+    const banner = document.createElement('div');
+    banner.className = 'claude-not-installed';
+    banner.innerHTML =
+      '<div class="claude-not-installed-icon">⚠️</div>' +
+      '<div class="claude-not-installed-title">Claude Code no está instalado</div>' +
+      '<div class="claude-not-installed-text">Para usar Claude en POTATO necesitas instalar Claude Code CLI:</div>' +
+      '<code class="claude-not-installed-cmd">npm install -g @anthropic-ai/claude-code</code>' +
+      '<div class="claude-not-installed-text">Después de instalar, reinicia POTATO.</div>';
+    this._messagesEl.appendChild(banner);
+
+    // Disable input
+    this._inputEl.disabled = true;
+    this._inputEl.placeholder = 'Claude Code no instalado';
+    document.getElementById('claude-send-btn').disabled = true;
   },
 
   toggle() {
@@ -283,6 +324,49 @@ const Claude = {
 
   // Construye el system prompt del vault dinámicamente con los agentes disponibles
   _buildVaultSystemPrompt() {
+    if (this.state.agentsOnly) {
+      return this._buildAgentsOnlyPrompt();
+    }
+    return this._buildHybridPrompt();
+  },
+
+  _buildAgentsOnlyPrompt() {
+    const parts = [
+      'Eres un ROUTER PURO. Tu UNICA funcion es delegar tareas a agentes especializados.',
+      'NUNCA resuelvas nada directamente. SIEMPRE delega con Task (subagent_type="general-purpose").',
+    ];
+
+    if (this.state.agents.length > 0) {
+      parts.push('');
+      parts.push('AGENTES DISPONIBLES:');
+      for (const agent of this.state.agents) {
+        parts.push(`- @${agent.name}: ${agent.description}`);
+      }
+    }
+
+    parts.push('');
+    parts.push('REGLAS ABSOLUTAS:');
+    parts.push('1. TODA tarea debe delegarse a un agente con Task. Sin excepciones.');
+    parts.push('2. Si el usuario menciona @nombre → usa ese agente.');
+    parts.push('3. Si no menciona agente → elige el mas adecuado de la lista.');
+    parts.push('4. NUNCA uses Glob, Grep, Read, WebSearch, WebFetch directamente. Delega.');
+    parts.push('5. NUNCA uses Bash, Write, Edit, MCP.');
+    parts.push('');
+    parts.push('CONTEXTO OBLIGATORIO AL DELEGAR:');
+    parts.push('Cuando uses Task, SIEMPRE incluye en el prompt del agente TODO este contexto:');
+    parts.push('- Ruta completa del vault');
+    parts.push('- Titulo y ruta de la nota abierta (si hay)');
+    parts.push('- Contenido relevante de la nota abierta (si aplica a la tarea)');
+    parts.push('- La peticion completa del usuario');
+    parts.push('- Cualquier contexto adicional de la conversacion que sea relevante');
+    parts.push('El agente NO tiene acceso a nuestra conversacion, asi que debes darle TODO lo que necesite.');
+    parts.push('');
+    parts.push('Responde en español. Se conciso.');
+
+    return parts.join('\n');
+  },
+
+  _buildHybridPrompt() {
     const parts = [
       'Eres un asistente inteligente trabajando dentro de un vault de notas markdown.',
       'Tu rol es analizar lo que el usuario necesita y decidir si delegarlo a un agente especializado o resolverlo directamente.',
@@ -336,6 +420,7 @@ const Claude = {
     this._updateWorkdirDisplay();
     this.newChat();
     this._loadAgents();
+    this._loadCommands();
   },
 
   _updateWorkdirDisplay() {
@@ -357,6 +442,7 @@ const Claude = {
     }
     this.newChat();
     this._loadAgents();
+    this._loadCommands();
   },
 
   async _pickProjectDir() {
@@ -367,6 +453,7 @@ const Claude = {
     this._updateProjectDirDisplay();
     this.newChat();
     this._loadAgents();
+    this._loadCommands();
   },
 
   _updateProjectDirDisplay() {
@@ -388,12 +475,14 @@ const Claude = {
     }
     this.newChat();
     this._loadAgents();
+    this._loadCommands();
   },
 
   onVaultChanged() {
     // Recargar agentes si no hay workdir/projectdir custom (usa vault)
     if (!this.state.workingDir && !this.state.projectDir) {
       this._loadAgents();
+    this._loadCommands();
     }
   },
 
@@ -425,16 +514,33 @@ const Claude = {
 
   async sendMessage() {
     if (this.state.isStreaming) return;
-    if (!this.state.installed) {
-      this._showError('Claude Code no esta instalado. Ejecuta: npm install -g @anthropic-ai/claude-code');
-      return;
-    }
+    if (!this.state.installed) return;
 
-    const text = this._inputEl.value.trim();
+    let text = this._inputEl.value.trim();
     if (!text) return;
 
     this._inputEl.value = '';
     this._autoResize();
+
+    // Resolver /command → inyectar contenido del archivo .md
+    let displayText = text;  // Lo que se muestra en el chat
+    const cmdMatch = text.match(/^\/(\S+)([\s\S]*)$/);
+    if (cmdMatch) {
+      const cmdName = cmdMatch[1];
+      const cmdArgs = cmdMatch[2].trim();
+      const cmd = this.state.commands.find(c => c.name === cmdName);
+      if (cmd) {
+        try {
+          const dir = this.state._resolvedCommandsDir || this._getCommandsDir();
+          const content = await this.invoke('read_claude_command', { path: dir, command: cmdName });
+          displayText = '/' + cmdName + (cmdArgs ? ' ' + cmdArgs : '');
+          text = content + (cmdArgs ? '\n\n' + cmdArgs : '');
+        } catch (err) {
+          this._showError('No se pudo leer el comando: ' + err);
+          return;
+        }
+      }
+    }
 
     if (!this.state.sessionId) {
       this.state.sessionId = 'claude-' + Date.now();
@@ -473,8 +579,8 @@ const Claude = {
       : text;
 
     if (!this._silent) {
-      this.state.messages.push({ role: 'user', content: text });
-      this._addUserMessage(text);
+      this.state.messages.push({ role: 'user', content: displayText });
+      this._addUserMessage(displayText);
     }
     this._silent = false;
 
@@ -1145,39 +1251,100 @@ const Claude = {
     }
   },
 
+  _getCommandsDir() {
+    return this.state.commandsDir || this._getAgentsDir();
+  },
+
+  async _loadCommands() {
+    // Intentar desde commandsDir, luego agentsDir
+    const dirs = [];
+    if (this.state.commandsDir) dirs.push(this.state.commandsDir);
+    const agentsDir = this._getAgentsDir();
+    if (agentsDir && agentsDir !== this.state.commandsDir) dirs.push(agentsDir);
+
+    for (const dir of dirs) {
+      try {
+        const commands = await this.invoke('list_claude_commands', { path: dir });
+        if (commands && commands.length > 0) {
+          this.state.commands = commands;
+          this.state._resolvedCommandsDir = dir;
+          console.log('[Claude] Commands loaded from', dir, ':', commands.length);
+          return;
+        }
+      } catch (_) {}
+    }
+    this.state.commands = [];
+  },
+
+  async _pickCommandsDir() {
+    const path = await this.invoke('open_vault');
+    if (!path) return;
+    this.state.commandsDir = path;
+    localStorage.setItem('potato-claude-commandsdir', path);
+    this._updateCommandsDirDisplay();
+    this._loadCommands();
+  },
+
+  _updateCommandsDirDisplay() {
+    const input = document.getElementById('setting-claude-commandsdir-input');
+    if (!input) return;
+    input.value = this.state.commandsDir || '';
+    input.placeholder = 'Usando directorio de agentes';
+  },
+
+  _setCommandsDirFromInput() {
+    const input = document.getElementById('setting-claude-commandsdir-input');
+    const path = (input.value || '').trim();
+    if (path === (this.state.commandsDir || '')) return;
+    this.state.commandsDir = path || null;
+    if (path) {
+      localStorage.setItem('potato-claude-commandsdir', path);
+    } else {
+      localStorage.removeItem('potato-claude-commandsdir');
+    }
+    this._loadCommands();
+  },
+
   _autocompleteCheck() {
     const val = this._inputEl.value;
     const pos = this._inputEl.selectionStart;
     const textBefore = val.slice(0, pos);
 
-    // Buscar @palabra al final del texto antes del cursor
-    const match = textBefore.match(/@([\w-]*)$/);
-    if (!match) {
-      this._autocompleteHide();
-      return;
+    // Buscar /comando al inicio del input (solo al principio)
+    const cmdMatch = textBefore.match(/^\/([\w-]*)$/);
+    if (cmdMatch) {
+      const query = cmdMatch[1].toLowerCase();
+      const filtered = this.state.commands.filter(c => c.name.toLowerCase().includes(query));
+      if (filtered.length > 0) {
+        this._acType = 'command';
+        this._autocompleteShow(filtered, cmdMatch.index, '/');
+        return;
+      }
     }
 
-    const query = match[1].toLowerCase();
-
-    // Builtin agents + custom agents (filtrar por modo)
-    const allBuiltins = [
-      { name: 'Explore', description: 'Explorar codebase rapidamente', modes: ['vault', 'project'] },
-      { name: 'Plan', description: 'Planear implementacion de tareas', modes: ['project'] },
-      { name: 'Bash', description: 'Ejecutar comandos de terminal', modes: ['project'] },
-    ];
-    const builtins = allBuiltins.filter(a => a.modes.includes(this.state.mode));
-    const all = [...this.state.agents, ...builtins];
-    const filtered = all.filter(a => a.name.toLowerCase().includes(query));
-
-    if (filtered.length === 0) {
-      this._autocompleteHide();
-      return;
+    // Buscar @agente al final del texto antes del cursor
+    const agentMatch = textBefore.match(/@([\w-]*)$/);
+    if (agentMatch) {
+      const query = agentMatch[1].toLowerCase();
+      const allBuiltins = [
+        { name: 'Explore', description: 'Explorar codebase rapidamente', modes: ['vault', 'project'] },
+        { name: 'Plan', description: 'Planear implementacion de tareas', modes: ['project'] },
+        { name: 'Bash', description: 'Ejecutar comandos de terminal', modes: ['project'] },
+      ];
+      const builtins = allBuiltins.filter(a => a.modes.includes(this.state.mode));
+      const all = [...this.state.agents, ...builtins];
+      const filtered = all.filter(a => a.name.toLowerCase().includes(query));
+      if (filtered.length > 0) {
+        this._acType = 'agent';
+        this._autocompleteShow(filtered, agentMatch.index, '@');
+        return;
+      }
     }
 
-    this._autocompleteShow(filtered, match.index);
+    this._autocompleteHide();
   },
 
-  _autocompleteShow(items, triggerPos) {
+  _autocompleteShow(items, triggerPos, prefix = '@') {
     let dropdown = document.getElementById('claude-autocomplete');
     if (!dropdown) {
       dropdown = document.createElement('div');
@@ -1188,12 +1355,13 @@ const Claude = {
 
     dropdown.innerHTML = '';
     dropdown.dataset.triggerPos = triggerPos;
+    dropdown.dataset.prefix = prefix;
 
     items.forEach((item, i) => {
       const el = document.createElement('div');
       el.className = 'claude-ac-item' + (i === 0 ? ' active' : '');
       el.dataset.name = item.name;
-      el.innerHTML = `<span class="claude-ac-name">@${this._escapeHtml(item.name)}</span>` +
+      el.innerHTML = `<span class="claude-ac-name">${prefix}${this._escapeHtml(item.name)}</span>` +
         (item.description ? `<span class="claude-ac-desc">${this._escapeHtml(item.description)}</span>` : '');
       el.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -1229,14 +1397,14 @@ const Claude = {
     const name = el.dataset.name;
     const dropdown = document.getElementById('claude-autocomplete');
     const triggerPos = parseInt(dropdown.dataset.triggerPos || '0');
+    const prefix = dropdown.dataset.prefix || '@';
     const val = this._inputEl.value;
     const pos = this._inputEl.selectionStart;
 
-    // Reemplazar @query con @nombre
     const before = val.slice(0, triggerPos);
     const after = val.slice(pos);
-    this._inputEl.value = before + '@' + name + ' ' + after;
-    const newPos = triggerPos + name.length + 2;
+    this._inputEl.value = before + prefix + name + ' ' + after;
+    const newPos = triggerPos + name.length + prefix.length + 1;
     this._inputEl.selectionStart = newPos;
     this._inputEl.selectionEnd = newPos;
     this._inputEl.focus();
@@ -1362,10 +1530,12 @@ const Claude = {
     this.state.messages = session.messages.slice();
     this.state.sessionApprovedTools = [];
 
-    // Restaurar modelo y modo
+    // Restaurar modelo y modo (normalizar IDs viejos a aliases)
     if (session.model) {
-      this.state.model = session.model;
-      document.getElementById('claude-model-select').value = session.model;
+      const ml = session.model.toLowerCase();
+      const alias = ml.includes('opus') ? 'opus' : ml.includes('haiku') ? 'haiku' : 'sonnet';
+      this.state.model = alias;
+      document.getElementById('claude-model-select').value = alias;
     }
     if (session.mode) {
       this.state.mode = session.mode;
@@ -1435,8 +1605,8 @@ const Claude = {
       const dateStr = date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })
         + ' ' + date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
 
-      const modelShort = (session.model || '').includes('opus') ? 'Opus'
-        : (session.model || '').includes('haiku') ? 'Haiku' : 'Sonnet';
+      const m = (session.model || 'sonnet').toLowerCase();
+      const modelShort = m.includes('opus') ? 'Opus' : m.includes('haiku') ? 'Haiku' : 'Sonnet';
 
       item.innerHTML = `
         <div class="claude-history-item-info">

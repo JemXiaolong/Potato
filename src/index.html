@@ -138,6 +138,14 @@
 
   <!-- Content: Editor -->
   <main class="content">
+    <div class="note-nav hidden" id="note-nav">
+      <button class="note-nav-btn" id="note-nav-back" title="Atrás" disabled>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="10 3 5 8 10 13"/></svg>
+      </button>
+      <button class="note-nav-btn" id="note-nav-forward" title="Adelante" disabled>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"/></svg>
+      </button>
+    </div>
     <div class="compact-note-resize" id="compact-note-resize"></div>
     <textarea
       class="editor"
@@ -157,9 +165,9 @@
     <div class="claude-header">
       <span class="claude-title">Claude</span>
       <select class="claude-model-select" id="claude-model-select">
-        <option value="claude-sonnet-4-5-20250929">Sonnet 4.5</option>
-        <option value="claude-opus-4-6">Opus 4.6</option>
-        <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+        <option value="sonnet">Sonnet</option>
+        <option value="opus">Opus</option>
+        <option value="haiku">Haiku</option>
       </select>
       <button class="claude-history-btn" id="claude-history-btn" title="Historial">&#9776;</button>
       <button class="claude-new-btn" id="claude-new-btn" title="Nuevo chat">+</button>
@@ -291,6 +299,26 @@
               <div class="settings-path-row">
                 <input type="text" class="settings-path-input" id="setting-claude-workdir-input" placeholder="Usando vault" spellcheck="false" autocomplete="off">
                 <button class="settings-action-btn" id="setting-claude-workdir-btn" title="Explorar">Cambiar</button>
+              </div>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Solo agentes</span>
+              <span class="settings-row-desc">Delegar todas las tareas a agentes, sin resolver directamente</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setting-claude-agents-only">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Directorio de comandos</span>
+              <span class="settings-row-desc">Carpeta con comandos custom (.claude/commands). Invoca con /nombre</span>
+              <div class="settings-path-row">
+                <input type="text" class="settings-path-input" id="setting-claude-commandsdir-input" placeholder="Usando directorio de agentes" spellcheck="false" autocomplete="off">
+                <button class="settings-action-btn" id="setting-claude-commandsdir-btn" title="Explorar">Cambiar</button>
               </div>
             </div>
           </div>

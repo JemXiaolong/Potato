@@ -1057,6 +1057,42 @@ mark {
   overflow: hidden;
 }
 
+/* Note navigation */
+.note-nav {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  z-index: 5;
+  display: flex;
+  gap: 2px;
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.note-nav:hover { opacity: 1; }
+.note-nav.hidden { display: none; }
+.note-nav-btn {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg-dim);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+.note-nav-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.note-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 /* Split view mode */
 .content.split-mode {
   display: flex !important;
@@ -2197,6 +2233,39 @@ body.claude-open {
   padding: 8px 12px;
   border-radius: 6px;
   font-size: 12px;
+}
+.claude-not-installed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 20px;
+  gap: 10px;
+  height: 100%;
+}
+.claude-not-installed-icon { font-size: 32px; }
+.claude-not-installed-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.claude-not-installed-text {
+  font-size: 12px;
+  color: var(--fg-dim);
+  line-height: 1.4;
+}
+.claude-not-installed-cmd {
+  display: block;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--accent);
+  user-select: all;
+  cursor: text;
 }
 .claude-tool-rejected {
   padding: 6px 12px;
