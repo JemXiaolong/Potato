@@ -83,6 +83,9 @@ const App = {
     // Detect external changes on window focus
     window.addEventListener('focus', () => this._onWindowFocus());
 
+    // Claude panel
+    Claude.init('claude-messages');
+
     // Search palette
     this._initSearch();
 
@@ -169,6 +172,10 @@ const App = {
     const entries = await this.invoke('list_vault', { path });
     Sidebar.render(entries);
 
+    // Notificar a Claude del nuevo vault
+    Claude.onVaultChanged();
+    Claude.updateContext();
+
     // Guardar sesion
     this._saveSession();
   },
@@ -207,6 +214,10 @@ const App = {
     this.setMode(this.state.mode);
     Sidebar.setActive(path);
 
+    // Update Claude context
+    Claude.updateContext();
+    Claude.onNoteOpened();
+
     // Guardar sesion
     this._saveSession();
   },
@@ -237,6 +248,10 @@ const App = {
 
     // Deseleccionar en sidebar
     Sidebar.setActive(null);
+
+    // Update Claude context
+    Claude.updateContext();
+    Claude.onNoteClosed();
 
     // Mostrar welcome
     this._showWelcome();
@@ -478,6 +493,10 @@ const App = {
         case 'f':
           e.preventDefault();
           this._openSearch();
+          break;
+        case 'l':
+          e.preventDefault();
+          Claude.toggle();
           break;
       }
     }
@@ -1116,6 +1135,10 @@ const App = {
     if (autosaveToggle) autosaveToggle.checked = this.state.autosave;
     const tocToggle = document.getElementById('setting-toc');
     if (tocToggle) tocToggle.checked = this.state.toc;
+
+    // Claude directories display
+    Claude._updateWorkdirDisplay();
+    Claude._updateProjectDirDisplay();
 
     modal.classList.add('open');
 

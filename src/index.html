@@ -23,6 +23,7 @@
       <span class="font-size-label" id="font-size-label">14</span>
       <button class="font-size-btn" id="font-size-up" title="Aumentar fuente">&#43;</button>
     </div>
+    <button class="claude-toggle-btn hidden" id="claude-toggle-btn" title="Claude (Ctrl+L)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1l1.5 3.5L13 6l-3.5 1.5L8 11 6.5 7.5 3 6l3.5-1.5z"/><path d="M12 10l.75 1.75L14.5 12.5l-1.75.75L12 15l-.75-1.75-1.75-.75 1.75-.75z"/></svg></button>
     <button class="split-btn hidden" id="split-btn" title="Vista dividida"><svg width="16" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="12" rx="1.5"/><line x1="8" y1="1" x2="8" y2="13"/></svg></button>
     <button class="close-note-btn hidden" id="close-note-btn" title="Cerrar nota">&times;</button>
     <div class="mode-toggle hidden" id="mode-toggle">
@@ -137,6 +138,7 @@
 
   <!-- Content: Editor -->
   <main class="content">
+    <div class="compact-note-resize" id="compact-note-resize"></div>
     <textarea
       class="editor"
       id="editor"
@@ -149,6 +151,49 @@
       <nav class="toc-list" id="toc-list"></nav>
     </aside>
   </main>
+
+  <!-- Claude Panel -->
+  <aside class="claude-panel hidden" id="claude-panel">
+    <div class="claude-header">
+      <span class="claude-title">Claude</span>
+      <select class="claude-model-select" id="claude-model-select">
+        <option value="claude-sonnet-4-5-20250929">Sonnet 4.5</option>
+        <option value="claude-opus-4-6">Opus 4.6</option>
+        <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+      </select>
+      <button class="claude-history-btn" id="claude-history-btn" title="Historial">&#9776;</button>
+      <button class="claude-new-btn" id="claude-new-btn" title="Nuevo chat">+</button>
+      <button class="claude-maximize-btn" id="claude-maximize-btn" title="Maximizar"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 1 1 1 1 4"/><polyline points="12 1 15 1 15 4"/><polyline points="4 15 1 15 1 12"/><polyline points="12 15 15 15 15 12"/></svg></button>
+      <button class="claude-minimize-btn" id="claude-minimize-btn" title="Minimizar">&#8213;</button>
+      <button class="claude-close-btn" id="claude-close-btn">&times;</button>
+    </div>
+    <div class="claude-messages" id="claude-messages"></div>
+    <div class="claude-history" id="claude-history">
+      <div class="claude-history-header">
+        <span class="claude-history-title">Historial de chats</span>
+        <button class="claude-history-close" id="claude-history-close">&times;</button>
+      </div>
+      <div class="claude-history-list" id="claude-history-list"></div>
+    </div>
+    <div class="claude-context-bar" id="claude-context-bar">
+      <select class="claude-mode-select" id="claude-mode-select">
+        <option value="vault">Vault</option>
+        <option value="project">Proyecto</option>
+      </select>
+      <span class="claude-context-name" id="claude-context-name"></span>
+    </div>
+    <div class="claude-input-area">
+      <textarea class="claude-input" id="claude-input" placeholder="Preguntale a Claude..." rows="1"></textarea>
+      <button class="claude-send-btn" id="claude-send-btn" title="Enviar">&#9654;</button>
+      <button class="claude-stop-btn hidden" id="claude-stop-btn" title="Detener">&#9632;</button>
+    </div>
+  </aside>
+
+  <!-- Claude minimized pill -->
+  <div class="claude-minimized-pill" id="claude-minimized-pill">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1l1.5 3.5L13 6l-3.5 1.5L8 11 6.5 7.5 3 6l3.5-1.5z"/><path d="M12 10l.75 1.75L14.5 12.5l-1.75.75L12 15l-.75-1.75-1.75-.75 1.75-.75z"/></svg>
+    <span>Claude</span>
+  </div>
 
   <!-- Status bar -->
   <footer class="statusbar">
@@ -237,6 +282,25 @@
             </label>
           </div>
         </div>
+        <div class="settings-section-title">Claude</div>
+        <div class="settings-section">
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Directorio de agentes</span>
+              <span class="settings-row-desc">Carpeta para cargar agentes custom (.claude/agents)</span>
+              <span class="settings-row-path" id="setting-claude-workdir-path">Usando vault</span>
+            </div>
+            <button class="settings-action-btn" id="setting-claude-workdir-btn">Cambiar</button>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-row-label">Directorio de proyecto</span>
+              <span class="settings-row-desc">Carpeta del codigo fuente para revisar y crear documentacion</span>
+              <span class="settings-row-path" id="setting-claude-projectdir-path">No configurado</span>
+            </div>
+            <button class="settings-action-btn" id="setting-claude-projectdir-btn">Cambiar</button>
+          </div>
+        </div>
         <div class="settings-soon">
           <div class="settings-soon-icon">&#9675;</div>
           <div class="settings-soon-title">Proximamente</div>
@@ -283,6 +347,7 @@
   <script src="js/sidebar.js"></script>
   <script src="js/editor.js"></script>
   <script src="js/preview.js"></script>
+  <script src="js/claude.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
