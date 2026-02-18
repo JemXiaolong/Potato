@@ -97,8 +97,20 @@ const Claude = {
     // Working directory button in settings
     document.getElementById('setting-claude-workdir-btn').addEventListener('click', () => this._pickWorkingDir());
 
+    // Working directory input - paste/type path
+    document.getElementById('setting-claude-workdir-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); this._setWorkingDirFromInput(); }
+    });
+    document.getElementById('setting-claude-workdir-input').addEventListener('blur', () => this._setWorkingDirFromInput());
+
     // Project directory button in settings
     document.getElementById('setting-claude-projectdir-btn').addEventListener('click', () => this._pickProjectDir());
+
+    // Project directory input - paste/type path
+    document.getElementById('setting-claude-projectdir-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); this._setProjectDirFromInput(); }
+    });
+    document.getElementById('setting-claude-projectdir-input').addEventListener('blur', () => this._setProjectDirFromInput());
 
     // Input: Enter to send, Shift+Enter for newline, autocomplete nav
     this._inputEl.addEventListener('keydown', (e) => {
@@ -273,23 +285,33 @@ const Claude = {
   _buildVaultSystemPrompt() {
     const parts = [
       'Eres un asistente inteligente trabajando dentro de un vault de notas markdown.',
-      'Tu rol es entender lo que el usuario necesita y usar las herramientas o agentes adecuados.',
+      'Tu rol es analizar lo que el usuario necesita y decidir si delegarlo a un agente especializado o resolverlo directamente.',
     ];
 
-    // Agentes disponibles
     if (this.state.agents.length > 0) {
       parts.push('');
-      parts.push('AGENTES ESPECIALIZADOS DISPONIBLES (invocalos con la herramienta Task, subagent_type="general-purpose"):');
+      parts.push('AGENTES ESPECIALIZADOS DISPONIBLES (invocalos con Task, subagent_type="general-purpose"):');
       for (const agent of this.state.agents) {
         parts.push(`- @${agent.name}: ${agent.description}`);
       }
       parts.push('');
-      parts.push('COMO ELEGIR:');
-      parts.push('- Si el usuario pregunta sobre documentacion, knowledge o notas → busca directo con Glob/Grep/Read o delega a un agente locator/analyzer.');
-      parts.push('- Si el usuario quiere investigar en internet → usa WebSearch/WebFetch o delega a un agente de research.');
-      parts.push('- Si el usuario pregunta sobre codigo (Odoo, modulos, etc.) → delega al agente de codebase apropiado.');
-      parts.push('- Si la tarea es simple (buscar un archivo, leer una nota) → hazlo tu directamente sin delegar.');
-      parts.push('- Si la tarea es compleja o requiere especialización → delega al agente mas adecuado.');
+      parts.push('CUANDO DELEGAR A UN AGENTE:');
+      parts.push('- Si el usuario menciona un agente con @nombre → OBLIGATORIO delegarle con Task.');
+      parts.push('- Si la tarea requiere analisis profundo, investigacion extensa o especializacion → delega al agente mas adecuado.');
+      parts.push('- Si la tarea involucra buscar documentacion, codigo o knowledge → delega al agente apropiado.');
+      parts.push('');
+      parts.push('CONTEXTO OBLIGATORIO AL DELEGAR:');
+      parts.push('Cuando uses Task para delegar, SIEMPRE incluye en el prompt del agente TODO este contexto:');
+      parts.push('- Ruta completa del vault');
+      parts.push('- Titulo y ruta de la nota abierta (si hay)');
+      parts.push('- Contenido relevante de la nota abierta (si aplica a la tarea)');
+      parts.push('- La peticion completa del usuario');
+      parts.push('- Cualquier contexto adicional de la conversacion que sea relevante');
+      parts.push('El agente NO tiene acceso a nuestra conversacion, asi que debes darle TODO lo que necesite para completar la tarea.');
+      parts.push('');
+      parts.push('CUANDO RESOLVER DIRECTAMENTE (sin agente):');
+      parts.push('- Tareas simples y rapidas: buscar un archivo especifico, leer una nota concreta, preguntas directas.');
+      parts.push('- Cuando ningun agente aplica a la tarea.');
     }
 
     parts.push('');
@@ -317,11 +339,24 @@ const Claude = {
   },
 
   _updateWorkdirDisplay() {
-    const pathEl = document.getElementById('setting-claude-workdir-path');
-    if (!pathEl) return;
-    const dir = this.state.workingDir;
-    pathEl.textContent = dir || 'Usando vault';
-    pathEl.title = dir || '';
+    const input = document.getElementById('setting-claude-workdir-input');
+    if (!input) return;
+    input.value = this.state.workingDir || '';
+    input.placeholder = 'Usando vault';
+  },
+
+  _setWorkingDirFromInput() {
+    const input = document.getElementById('setting-claude-workdir-input');
+    const path = (input.value || '').trim();
+    if (path === (this.state.workingDir || '')) return;
+    this.state.workingDir = path || null;
+    if (path) {
+      localStorage.setItem('potato-claude-workdir', path);
+    } else {
+      localStorage.removeItem('potato-claude-workdir');
+    }
+    this.newChat();
+    this._loadAgents();
   },
 
   async _pickProjectDir() {
@@ -335,11 +370,24 @@ const Claude = {
   },
 
   _updateProjectDirDisplay() {
-    const pathEl = document.getElementById('setting-claude-projectdir-path');
-    if (!pathEl) return;
-    const dir = this.state.projectDir;
-    pathEl.textContent = dir || 'No configurado';
-    pathEl.title = dir || '';
+    const input = document.getElementById('setting-claude-projectdir-input');
+    if (!input) return;
+    input.value = this.state.projectDir || '';
+    input.placeholder = 'No configurado';
+  },
+
+  _setProjectDirFromInput() {
+    const input = document.getElementById('setting-claude-projectdir-input');
+    const path = (input.value || '').trim();
+    if (path === (this.state.projectDir || '')) return;
+    this.state.projectDir = path || null;
+    if (path) {
+      localStorage.setItem('potato-claude-projectdir', path);
+    } else {
+      localStorage.removeItem('potato-claude-projectdir');
+    }
+    this.newChat();
+    this._loadAgents();
   },
 
   onVaultChanged() {

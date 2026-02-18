@@ -288,17 +288,21 @@
             <div class="settings-row-info">
               <span class="settings-row-label">Directorio de agentes</span>
               <span class="settings-row-desc">Carpeta para cargar agentes custom (.claude/agents)</span>
-              <span class="settings-row-path" id="setting-claude-workdir-path">Usando vault</span>
+              <div class="settings-path-row">
+                <input type="text" class="settings-path-input" id="setting-claude-workdir-input" placeholder="Usando vault" spellcheck="false" autocomplete="off">
+                <button class="settings-action-btn" id="setting-claude-workdir-btn" title="Explorar">Cambiar</button>
+              </div>
             </div>
-            <button class="settings-action-btn" id="setting-claude-workdir-btn">Cambiar</button>
           </div>
           <div class="settings-row">
             <div class="settings-row-info">
               <span class="settings-row-label">Directorio de proyecto</span>
               <span class="settings-row-desc">Carpeta del codigo fuente para revisar y crear documentacion</span>
-              <span class="settings-row-path" id="setting-claude-projectdir-path">No configurado</span>
+              <div class="settings-path-row">
+                <input type="text" class="settings-path-input" id="setting-claude-projectdir-input" placeholder="No configurado" spellcheck="false" autocomplete="off">
+                <button class="settings-action-btn" id="setting-claude-projectdir-btn" title="Explorar">Cambiar</button>
+              </div>
             </div>
-            <button class="settings-action-btn" id="setting-claude-projectdir-btn">Cambiar</button>
           </div>
         </div>
         <div class="settings-soon">
