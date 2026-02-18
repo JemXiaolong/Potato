@@ -16,6 +16,9 @@ const App = {
 
   _autosaveTimeout: null,
   _lastSavedContent: null,  // track content to detect external changes
+  _noteHistory: [],     // stack de notas visitadas
+  _noteHistoryIndex: -1, // posición actual en el stack
+  _navInProgress: false, // flag para no pushear al navegar con back/forward
 
   // Referencia a invoke de Tauri
   invoke: null,
@@ -73,6 +76,10 @@ const App = {
 
     // Close note button
     document.getElementById('close-note-btn').addEventListener('click', () => this.closeNote());
+
+    // Note navigation (back/forward)
+    document.getElementById('note-nav-back').addEventListener('click', () => this._noteNavBack());
+    document.getElementById('note-nav-forward').addEventListener('click', () => this._noteNavForward());
 
     // Sidebar resize
     this._initSidebarResize();
@@ -196,6 +203,15 @@ const App = {
     const content = await this.invoke('read_note', { path });
     if (content === null) return;
 
+    // Push al historial de navegación (solo si no es nav back/forward)
+    if (!this._navInProgress) {
+      if (this._noteHistoryIndex < this._noteHistory.length - 1) {
+        this._noteHistory = this._noteHistory.slice(0, this._noteHistoryIndex + 1);
+      }
+      this._noteHistory.push({ path, title });
+      this._noteHistoryIndex = this._noteHistory.length - 1;
+    }
+
     this.state.currentNote = { path, title };
     this.state.dirty = false;
     this._lastSavedContent = content;
@@ -209,10 +225,12 @@ const App = {
     document.getElementById('close-note-btn').classList.remove('hidden');
     document.getElementById('split-btn').classList.remove('hidden');
     document.getElementById('font-size-controls').classList.remove('hidden');
+    document.getElementById('note-nav').classList.remove('hidden');
 
     // Sync editor/preview visibility with current mode
     this.setMode(this.state.mode);
     Sidebar.setActive(path);
+    this._updateNoteNav();
 
     // Update Claude context
     Claude.updateContext();
@@ -235,6 +253,7 @@ const App = {
     document.getElementById('close-note-btn').classList.add('hidden');
     document.getElementById('split-btn').classList.add('hidden');
     document.getElementById('font-size-controls').classList.add('hidden');
+    document.getElementById('note-nav').classList.add('hidden');
 
     // Reset split mode, TOC, and clean up
     const content = document.querySelector('.content');
@@ -258,6 +277,31 @@ const App = {
 
     // Guardar sesion (sin nota)
     this._saveSession();
+  },
+
+  async _noteNavBack() {
+    if (this._noteHistoryIndex <= 0) return;
+    this._noteHistoryIndex--;
+    const { path, title } = this._noteHistory[this._noteHistoryIndex];
+    this._navInProgress = true;
+    await this.openNote(path, title);
+    this._navInProgress = false;
+  },
+
+  async _noteNavForward() {
+    if (this._noteHistoryIndex >= this._noteHistory.length - 1) return;
+    this._noteHistoryIndex++;
+    const { path, title } = this._noteHistory[this._noteHistoryIndex];
+    this._navInProgress = true;
+    await this.openNote(path, title);
+    this._navInProgress = false;
+  },
+
+  _updateNoteNav() {
+    const back = document.getElementById('note-nav-back');
+    const forward = document.getElementById('note-nav-forward');
+    back.disabled = this._noteHistoryIndex <= 0;
+    forward.disabled = this._noteHistoryIndex >= this._noteHistory.length - 1;
   },
 
   async saveCurrentNote() {
@@ -1136,9 +1180,12 @@ const App = {
     const tocToggle = document.getElementById('setting-toc');
     if (tocToggle) tocToggle.checked = this.state.toc;
 
-    // Claude directories display
+    // Claude settings sync
     Claude._updateWorkdirDisplay();
     Claude._updateProjectDirDisplay();
+    Claude._updateCommandsDirDisplay();
+    const agentsOnlyToggle = document.getElementById('setting-claude-agents-only');
+    if (agentsOnlyToggle) agentsOnlyToggle.checked = Claude.state.agentsOnly;
 
     modal.classList.add('open');
 
