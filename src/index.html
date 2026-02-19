@@ -18,7 +18,7 @@
       <input type="text" class="toolbar-search-input" id="toolbar-search-input" placeholder="Buscar..." autocomplete="off" spellcheck="false">
       <kbd class="toolbar-search-hint">Ctrl+P</kbd>
     </div>
-    <div class="font-size-controls hidden" id="font-size-controls">
+    <div class="font-size-controls" id="font-size-controls">
       <button class="font-size-btn" id="font-size-down" title="Reducir fuente">&#8722;</button>
       <span class="font-size-label" id="font-size-label">14</span>
       <button class="font-size-btn" id="font-size-up" title="Aumentar fuente">&#43;</button>
@@ -125,6 +125,16 @@
   <div class="progress-bar" id="progress-bar">
     <div class="progress-fill" id="progress-fill"></div>
     <span class="progress-text" id="progress-text"></span>
+  </div>
+
+  <!-- Update banner -->
+  <div class="update-banner hidden" id="update-banner">
+    <span class="update-text">
+      <span class="update-icon">&#8681;</span>
+      Nueva versión <strong id="update-version"></strong> disponible
+    </span>
+    <button class="update-link" id="update-link">Descargar</button>
+    <button class="update-close" id="update-close">&times;</button>
   </div>
 
   <!-- Sidebar -->

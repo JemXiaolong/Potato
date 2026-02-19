@@ -47,7 +47,7 @@ ssh -T git@github.com  # Verificar conexion
 ### Desde .deb (usuarios)
 
 ```bash
-sudo dpkg -i POTATO_0.15.0.deb
+sudo dpkg -i POTATO_0.17.0_amd64.deb
 ```
 
 Si marca error de dependencias:
@@ -87,8 +87,34 @@ npm run build
 ```
 
 Genera los instaladores en `src-tauri/target/release/bundle/`:
-- `deb/POTATO_0.15.0_amd64.deb`
-- `appimage/POTATO_0.15.0_amd64.AppImage`
+- `deb/POTATO_0.17.0_amd64.deb`
+- `appimage/POTATO_0.17.0_amd64.AppImage`
+
+## Publicar una nueva version
+
+POTATO detecta actualizaciones automaticamente al iniciar, consultando la API publica de GitHub Releases. Para que la deteccion funcione correctamente:
+
+1. Actualizar la version en los 4 archivos:
+   - `package.json`
+   - `src-tauri/Cargo.toml`
+   - `src-tauri/tauri.conf.json`
+   - `src/js/app.js` (`_appVersion`)
+
+2. Compilar los instaladores:
+   ```bash
+   npm run build
+   ```
+
+3. Crear el release en GitHub con tag semver (el prefijo `v` es opcional):
+   ```bash
+   gh release create v0.X.0 \
+     --title "POTATO v0.X.0" \
+     --notes "Descripcion del release" \
+     src-tauri/target/release/bundle/deb/POTATO_0.X.0_amd64.deb \
+     src-tauri/target/release/bundle/appimage/POTATO_0.X.0_amd64.AppImage
+   ```
+
+> **Importante:** El release NO debe estar marcado como pre-release ni como draft. La API `/releases/latest` solo devuelve releases publicados. El `tag_name` debe ser una version mayor a la de `_appVersion` en `app.js`.
 
 ## Atajos de teclado
 
@@ -139,6 +165,7 @@ potato --help      # Muestra la ayuda
 - Persistencia de sesion (recuerda vault y nota al reabrir)
 - Fuente Nunito integrada
 - Asistente IA integrado (Claude Code) con agentes, historial y modo vault/proyecto
+- Notificacion de actualizacion desde GitHub Releases
 - CLI: `--version` y `--help`
 
 ## Ajustes

@@ -109,6 +109,9 @@ const App = {
     if (!this.state.currentNote) {
       this._showWelcome();
     }
+
+    // Check for updates (non-blocking)
+    this._checkForUpdates();
   },
 
   // -- Session -------------------------------------------------------------
@@ -224,7 +227,6 @@ const App = {
     document.getElementById('mode-toggle').classList.remove('hidden');
     document.getElementById('close-note-btn').classList.remove('hidden');
     document.getElementById('split-btn').classList.remove('hidden');
-    document.getElementById('font-size-controls').classList.remove('hidden');
     document.getElementById('note-nav').classList.remove('hidden');
 
     // Sync editor/preview visibility with current mode
@@ -252,7 +254,6 @@ const App = {
     document.getElementById('mode-toggle').classList.add('hidden');
     document.getElementById('close-note-btn').classList.add('hidden');
     document.getElementById('split-btn').classList.add('hidden');
-    document.getElementById('font-size-controls').classList.add('hidden');
     document.getElementById('note-nav').classList.add('hidden');
 
     // Reset split mode, TOC, and clean up
@@ -1595,6 +1596,61 @@ const App = {
 
     Editor.hide();
     Preview.show();
+  },
+
+  // -- Updates ---------------------------------------------------------------
+
+  _appVersion: '0.17.0',
+
+  async _checkForUpdates() {
+    try {
+      const resp = await fetch('https://api.github.com/repos/JemXiaolong/Potato/releases/latest', {
+        headers: { 'Accept': 'application/vnd.github.v3+json' },
+      });
+      if (!resp.ok) return;
+
+      const data = await resp.json();
+      const latest = (data.tag_name || '').replace(/^v/, '');
+      if (!latest) return;
+
+      // Comparar versiones
+      if (!this._isNewer(latest, this._appVersion)) return;
+
+      // No mostrar si ya dismisseó esta versión
+      const dismissed = localStorage.getItem('potato-update-dismissed');
+      if (dismissed === latest) return;
+
+      // Mostrar banner
+      this._showUpdateBanner(latest, data.html_url);
+    } catch (_) {
+      // Silenciar errores de red — no es crítico
+    }
+  },
+
+  _isNewer(latest, current) {
+    const a = latest.split('.').map(Number);
+    const b = current.split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      if ((a[i] || 0) > (b[i] || 0)) return true;
+      if ((a[i] || 0) < (b[i] || 0)) return false;
+    }
+    return false;
+  },
+
+  _showUpdateBanner(version, url) {
+    const banner = document.getElementById('update-banner');
+    document.getElementById('update-version').textContent = 'v' + version;
+
+    document.getElementById('update-link').onclick = () => {
+      this.invoke('open_in_explorer', { path: url });
+    };
+
+    document.getElementById('update-close').onclick = () => {
+      banner.classList.add('hidden');
+      localStorage.setItem('potato-update-dismissed', version);
+    };
+
+    banner.classList.remove('hidden');
   },
 };
 

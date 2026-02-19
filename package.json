@@ -1,6 +1,6 @@
 {
   "name": "potato",
-  "version": "0.15.0",
+  "version": "0.17.0",
   "private": true,
   "scripts": {
     "dev": "npx @tauri-apps/cli dev",
