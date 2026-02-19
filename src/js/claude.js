@@ -25,6 +25,9 @@ const Claude = {
     sessionApprovedTools: [],
     panelMode: 'closed', // 'closed', 'normal', 'minimized', 'maximized'
     agentsOnly: false,   // true = pure router, false = hybrid
+    graphView: false,
+    graphNodes: [],      // [{id, name, desc, status}]
+    _agentTimers: {},    // {tool_id: timeoutId} — debounce per agent
   },
 
   invoke: null,
@@ -55,6 +58,9 @@ const Claude = {
 
     // Minimized pill click
     document.getElementById('claude-minimized-pill').addEventListener('click', () => this.restoreFromMinimize());
+
+    // Graph view button
+    document.getElementById('claude-graph-btn').addEventListener('click', () => this._toggleGraphView());
 
     // Maximize button
     document.getElementById('claude-maximize-btn').addEventListener('click', () => {
@@ -203,7 +209,7 @@ const Claude = {
       '<div class="claude-not-installed-icon">⚠️</div>' +
       '<div class="claude-not-installed-title">Claude Code no está instalado</div>' +
       '<div class="claude-not-installed-text">Para usar Claude en POTATO necesitas instalar Claude Code CLI:</div>' +
-      '<code class="claude-not-installed-cmd">npm install -g @anthropic-ai/claude-code</code>' +
+      '<code class="claude-not-installed-cmd">curl -fsSL https://claude.ai/install.sh | sh</code>' +
       '<div class="claude-not-installed-text">Después de instalar, reinicia POTATO.</div>';
     this._messagesEl.appendChild(banner);
 
@@ -586,7 +592,6 @@ const Claude = {
 
     this.state.isStreaming = true;
     this._setStreamingUI(true);
-
     this._showThinking();
 
     const channel = new window.__TAURI__.core.Channel();
@@ -651,8 +656,12 @@ const Claude = {
             this._showToolStart(chunk.tool);
           }
         } else if (chunk.tool.phase === 'result') {
-          if (document.getElementById('claude-agent-' + chunk.tool.tool_id)) {
-            this._showAgentResult(chunk.tool);
+          // Check if this tool_id belongs to a tracked agent
+          const isAgent = this.state.graphNodes.some(n => n.id === chunk.tool.tool_id);
+          if (isAgent) {
+            // Debounce: reset the timer each time we get activity for this agent.
+            // When no events arrive for 5s, we consider the agent done.
+            this._resetAgentTimer(chunk.tool);
           } else {
             this._showToolResult(chunk.tool);
           }
@@ -669,6 +678,19 @@ const Claude = {
         this.state.isStreaming = false;
         this._setStreamingUI(false);
         this._saveToHistory();
+
+        // Clear all debounce timers and mark remaining working agents as done
+        this._clearAllAgentTimers();
+        let agentChanged = false;
+        for (const node of this.state.graphNodes) {
+          if (node.status === 'working') {
+            node.status = 'done';
+            agentChanged = true;
+            this._markAgentDoneInChat(node.id, false);
+          }
+        }
+        if (agentChanged && this.state.graphView) this._renderGraph();
+
         return;
       }
 
@@ -725,6 +747,17 @@ const Claude = {
     }
     this.state.isStreaming = false;
     this._setStreamingUI(false);
+
+    // Clear all debounce timers and mark working agents as stopped
+    this._clearAllAgentTimers();
+    let changed = false;
+    for (const node of this.state.graphNodes) {
+      if (node.status === 'working') {
+        node.status = 'stopped';
+        changed = true;
+      }
+    }
+    if (changed && this.state.graphView) this._renderGraph();
   },
 
   newChat() {
@@ -738,6 +771,9 @@ const Claude = {
     this.state.messages = [];
     this.state.sessionApprovedTools = [];
     this._messagesEl.innerHTML = '';
+    this._clearAllAgentTimers();
+    this.state.graphNodes = [];
+    if (this.state.graphView) this._renderGraph();
     this._inputEl.value = '';
     this._autoResize();
     this._inputEl.focus();
@@ -892,6 +928,17 @@ const Claude = {
     `;
     this._messagesEl.appendChild(el);
     this._scrollToBottom();
+
+    // Track node for graph view
+    const bubbleText = (inp.description || inp.prompt || '').slice(0, 80);
+
+    this.state.graphNodes.push({
+      id: tool.tool_id,
+      name: agentType,
+      desc: bubbleText,
+      status: 'working',
+    });
+    if (this.state.graphView) this._renderGraph();
   },
 
   _showAgentResult(tool) {
@@ -904,6 +951,13 @@ const Claude = {
     if (pulse) pulse.classList.add('done');
     const status = el.querySelector('.claude-agent-status');
     if (status) status.textContent = tool.is_error ? 'error' : 'listo';
+
+    // Update graph node status
+    const node = this.state.graphNodes.find(n => n.id === tool.tool_id);
+    if (node) {
+      node.status = tool.is_error ? 'error' : 'done';
+    }
+    if (this.state.graphView) this._renderGraph();
 
     // Mostrar resultado truncado si hay
     if (tool.result && tool.result.trim()) {
@@ -1720,5 +1774,136 @@ const Claude = {
       case 'Grep': return input.pattern || '';
       default: return '';
     }
+  },
+
+  // -- Agent debounce (per-agent completion detection) -------------------------
+
+  _resetAgentTimer(tool) {
+    const id = tool.tool_id;
+    // Clear existing timer for this agent
+    if (this.state._agentTimers[id]) {
+      clearTimeout(this.state._agentTimers[id]);
+    }
+    // Set new timer: if no activity for 5s, agent is considered done
+    this.state._agentTimers[id] = setTimeout(() => {
+      delete this.state._agentTimers[id];
+      const node = this.state.graphNodes.find(n => n.id === id);
+      if (node && node.status === 'working') {
+        node.status = tool.is_error ? 'error' : 'done';
+        this._markAgentDoneInChat(id, tool.is_error);
+        if (this.state.graphView) this._renderGraph();
+      }
+    }, 5000);
+  },
+
+  _clearAllAgentTimers() {
+    for (const id of Object.keys(this.state._agentTimers)) {
+      clearTimeout(this.state._agentTimers[id]);
+    }
+    this.state._agentTimers = {};
+  },
+
+  _markAgentDoneInChat(toolId, isError) {
+    const agentEl = document.getElementById('claude-agent-' + toolId);
+    if (!agentEl) return;
+    agentEl.classList.add(isError ? 'error' : 'done');
+    const pulse = agentEl.querySelector('.claude-agent-pulse');
+    if (pulse) pulse.classList.add('done');
+    const status = agentEl.querySelector('.claude-agent-status');
+    if (status) status.textContent = isError ? 'error' : 'listo';
+  },
+
+  // -- Graph View --------------------------------------------------------------
+
+  _toggleGraphView() {
+    this.state.graphView = !this.state.graphView;
+    document.body.classList.toggle('claude-graph-active', this.state.graphView);
+    document.getElementById('claude-graph-btn').classList.toggle('active', this.state.graphView);
+    if (this.state.graphView) this._renderGraph();
+  },
+
+  _renderGraph() {
+    const nodesContainer = document.getElementById('claude-graph-nodes');
+    const emptyMsg = this._container.querySelector('.claude-graph-empty');
+
+    if (this.state.graphNodes.length === 0) {
+      if (emptyMsg) emptyMsg.style.display = '';
+      nodesContainer.innerHTML = '';
+      return;
+    }
+    if (emptyMsg) emptyMsg.style.display = 'none';
+
+    // Diff-based node rendering (preserves CSS animations)
+    const activeIds = new Set(this.state.graphNodes.map(n => n.id));
+
+    for (const node of this.state.graphNodes) {
+      let el = nodesContainer.querySelector('[data-node-id="' + node.id + '"]');
+
+      if (!el) {
+        el = document.createElement('div');
+        el.classList.add('claude-graph-node', node.status);
+        el.dataset.nodeId = node.id;
+        el.innerHTML =
+          '<div class="claude-graph-node-bubble"></div>' +
+          '<div class="claude-graph-node-head">' +
+            '<div class="claude-graph-node-antenna"></div>' +
+            '<div class="claude-graph-node-eye left"></div>' +
+            '<div class="claude-graph-node-eye right"></div>' +
+          '</div>' +
+          '<div class="claude-graph-node-name"></div>' +
+          '<div class="claude-graph-node-status"></div>';
+        nodesContainer.appendChild(el);
+
+        // After fade-out animation, remove element so remaining nodes reflow
+        el.addEventListener('animationend', (e) => {
+          if (e.animationName === 'agent-node-out') {
+            const id = el.dataset.nodeId;
+            el.remove();
+            const idx = this.state.graphNodes.findIndex(n => n.id === id);
+            if (idx !== -1) this.state.graphNodes.splice(idx, 1);
+            // Show empty state if all gone
+            if (this.state.graphNodes.length === 0 && emptyMsg) {
+              emptyMsg.style.display = '';
+            }
+          }
+        });
+      } else if (!el.classList.contains(node.status)) {
+        // Status changed — swap class (triggers CSS animation)
+        el.classList.remove('working', 'done', 'error', 'stopped');
+        el.classList.add(node.status);
+      }
+
+      // Update name
+      const nameEl = el.querySelector('.claude-graph-node-name');
+      if (nameEl.textContent !== node.name) {
+        nameEl.textContent = node.name;
+        nameEl.title = node.name;
+      }
+
+      // Update status text (Spanish)
+      const statusEl = el.querySelector('.claude-graph-node-status');
+      const statusMap = { working: 'trabajando', done: 'listo', error: 'error', stopped: 'detenido' };
+      const statusText = statusMap[node.status] || node.status;
+      if (statusEl.textContent !== statusText) statusEl.textContent = statusText;
+
+      // Update speech bubble (visible only while working)
+      const bubble = el.querySelector('.claude-graph-node-bubble');
+      if (node.status === 'working' && node.desc) {
+        const currentText = bubble.dataset.text || '';
+        if (currentText !== node.desc) {
+          bubble.dataset.text = node.desc;
+          bubble.innerHTML = this._escapeHtml(node.desc) +
+            '<span class="claude-graph-node-bubble-dots"><span></span><span></span><span></span></span>';
+        }
+        bubble.style.display = '';
+      } else {
+        bubble.style.display = 'none';
+      }
+    }
+
+    // Remove orphaned DOM nodes
+    nodesContainer.querySelectorAll('.claude-graph-node').forEach(el => {
+      if (!activeIds.has(el.dataset.nodeId)) el.remove();
+    });
   },
 };

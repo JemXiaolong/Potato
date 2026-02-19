@@ -47,7 +47,7 @@ ssh -T git@github.com  # Verificar conexion
 ### Desde .deb (usuarios)
 
 ```bash
-sudo dpkg -i POTATO_0.4.0.deb
+sudo dpkg -i POTATO_0.15.0.deb
 ```
 
 Si marca error de dependencias:
@@ -87,8 +87,8 @@ npm run build
 ```
 
 Genera los instaladores en `src-tauri/target/release/bundle/`:
-- `deb/POTATO_0.4.0_amd64.deb`
-- `appimage/POTATO_0.4.0_amd64.AppImage`
+- `deb/POTATO_0.15.0_amd64.deb`
+- `appimage/POTATO_0.15.0_amd64.AppImage`
 
 ## Atajos de teclado
 
@@ -103,6 +103,23 @@ Genera los instaladores en `src-tauri/target/release/bundle/`:
 | `Ctrl+B` | Mostrar / ocultar sidebar |
 | `Ctrl+P` | Buscar notas y contenido |
 | `Ctrl+W` | Cerrar nota |
+
+### Claude Code CLI (para asistente IA)
+
+Claude Code es opcional. Si lo instalas, POTATO integra un panel de chat con IA:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | sh
+```
+
+## CLI
+
+POTATO responde a argumentos de linea de comandos:
+
+```bash
+potato --version   # Muestra la version
+potato --help      # Muestra la ayuda
+```
 
 ## Funcionalidades
 
@@ -121,6 +138,8 @@ Genera los instaladores en `src-tauri/target/release/bundle/`:
 - Auto-guardado al dejar de escribir (configurable)
 - Persistencia de sesion (recuerda vault y nota al reabrir)
 - Fuente Nunito integrada
+- Asistente IA integrado (Claude Code) con agentes, historial y modo vault/proyecto
+- CLI: `--version` y `--help`
 
 ## Ajustes
 
@@ -149,6 +168,7 @@ Potato/
 │   │   ├── editor.js       # Editor de texto
 │   │   ├── preview.js      # Vista previa Markdown
 │   │   ├── sidebar.js      # Arbol de archivos
+│   │   ├── claude.js       # Panel de chat con Claude Code
 │   │   ├── wikilinks.js    # Parser de wikilinks
 │   │   └── vendor/         # marked.js, highlight.js
 │   └── index.html

@@ -3054,3 +3054,371 @@ body.claude-maximized.has-compact-note .content.split-mode .editor {
 body.claude-maximized.has-compact-note .content.split-mode .preview {
   width: 100% !important;
 }
+
+/* === Agent Graph View === */
+
+/* Graph toggle button */
+.claude-graph-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.claude-graph-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+.claude-graph-btn.active {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Graph container */
+.claude-graph {
+  display: none;
+  position: relative;
+  overflow: auto;
+  flex: 1;
+  background:
+    radial-gradient(circle at 1px 1px, var(--border) 0.5px, transparent 0.5px);
+  background-size: 24px 24px;
+  background-color: var(--bg-base);
+}
+.claude-graph::-webkit-scrollbar { width: 5px; height: 5px; }
+.claude-graph::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.claude-graph-svg {
+  display: none;
+}
+.claude-graph-nodes {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: center;
+  gap: 12px;
+  padding: 50px 12px 16px;
+}
+.claude-graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* Body wrapper (messages + graph) */
+.claude-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Graph active: normal panel (360px) — graph replaces chat */
+body.claude-graph-active .claude-graph {
+  display: flex;
+  flex-direction: column;
+}
+body:not(.claude-maximized).claude-graph-active .claude-messages {
+  display: none;
+}
+
+/* Graph active: maximized — split view (chat + graph side by side) */
+body.claude-maximized.claude-graph-active .claude-body {
+  flex-direction: row;
+}
+body.claude-maximized.claude-graph-active .claude-messages {
+  display: flex;
+  width: 50%;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+}
+body.claude-maximized.claude-graph-active .claude-graph {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+/* === Graph Nodes (Robot Heads) === */
+.claude-graph-node {
+  position: relative;
+  width: 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  animation: agent-node-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: margin 0.4s ease, opacity 0.3s ease;
+}
+
+/* Robot head */
+.claude-graph-node-head {
+  width: 44px;
+  height: 38px;
+  border-radius: 12px 12px 10px 10px;
+  background: var(--bg-elevated);
+  border: 2px solid var(--accent);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+/* Antenna */
+.claude-graph-node-antenna {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 8px;
+  background: var(--accent);
+}
+.claude-graph-node-antenna::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Eyes */
+.claude-graph-node-eye {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  transition: background 0.3s;
+}
+
+/* Name label */
+.claude-graph-node-name {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status pill */
+.claude-graph-node-status {
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+}
+
+/* Speech bubble */
+.claude-graph-node-bubble {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 4px 7px;
+  font-size: 8px;
+  color: var(--text-secondary);
+  width: max-content;
+  max-width: 130px;
+  text-align: center;
+  line-height: 1.3;
+  word-break: break-word;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  animation: bubble-in 0.25s ease-out;
+  z-index: 2;
+}
+.claude-graph-node-bubble-dots {
+  display: inline-block;
+  margin-left: 2px;
+}
+.claude-graph-node-bubble-dots span {
+  display: inline-block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin: 0 1px;
+  animation: bubble-dot 1.2s ease-in-out infinite;
+}
+.claude-graph-node-bubble-dots span:nth-child(2) { animation-delay: 0.2s; }
+.claude-graph-node-bubble-dots span:nth-child(3) { animation-delay: 0.4s; }
+.claude-graph-node-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid var(--bg-elevated);
+}
+.claude-graph-node-bubble::before {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--border-light);
+  z-index: -1;
+}
+
+/* Active node — pulsing + spinning ring */
+.claude-graph-node.working .claude-graph-node-head {
+  animation: agent-pulse-glow 1.5s ease-in-out infinite;
+}
+.claude-graph-node.working .claude-graph-node-head::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 18px 18px 16px 16px;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: rgba(167, 139, 250, 0.3);
+  animation: graph-spin 0.8s linear infinite;
+}
+.claude-graph-node.working .claude-graph-node-antenna::after {
+  animation: agent-pulse 1.2s ease-in-out infinite;
+}
+
+/* Done node — green, fades out after session ends */
+.claude-graph-node.done {
+  animation: agent-node-out 1.5s ease 2s forwards;
+}
+.claude-graph-node.done .claude-graph-node-head {
+  border-color: #4ade80;
+  animation: agent-done-flash 0.4s ease;
+}
+.claude-graph-node.done .claude-graph-node-eye {
+  background: #4ade80;
+}
+.claude-graph-node.done .claude-graph-node-antenna {
+  background: #4ade80;
+}
+.claude-graph-node.done .claude-graph-node-antenna::after {
+  background: #4ade80;
+}
+.claude-graph-node.done .claude-graph-node-status {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  border-color: rgba(74, 222, 128, 0.3);
+}
+
+/* Error node — red, fades out after session ends */
+.claude-graph-node.error {
+  animation: agent-node-out 1.5s ease 2s forwards;
+}
+.claude-graph-node.error .claude-graph-node-head {
+  border-color: #f87171;
+}
+.claude-graph-node.error .claude-graph-node-eye {
+  background: #f87171;
+}
+.claude-graph-node.error .claude-graph-node-antenna {
+  background: #f87171;
+}
+.claude-graph-node.error .claude-graph-node-antenna::after {
+  background: #f87171;
+}
+.claude-graph-node.error .claude-graph-node-status {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+/* Stopped node — gray, fades out faster */
+.claude-graph-node.stopped {
+  animation: agent-node-out 0.8s ease 0.5s forwards;
+}
+.claude-graph-node.stopped .claude-graph-node-head {
+  border-color: var(--text-muted);
+  animation: none;
+}
+.claude-graph-node.stopped .claude-graph-node-head::before {
+  display: none;
+}
+.claude-graph-node.stopped .claude-graph-node-eye {
+  background: var(--text-muted);
+}
+.claude-graph-node.stopped .claude-graph-node-antenna {
+  background: var(--text-muted);
+}
+.claude-graph-node.stopped .claude-graph-node-antenna::after {
+  background: var(--text-muted);
+}
+.claude-graph-node.stopped .claude-graph-node-status {
+  color: var(--text-muted);
+  background: rgba(102, 102, 102, 0.1);
+  border-color: rgba(102, 102, 102, 0.3);
+}
+
+
+/* === Graph Animations === */
+@keyframes agent-node-in {
+  0% { opacity: 0; transform: scale(0); }
+  70% { transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes agent-node-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.85); pointer-events: none; }
+}
+
+@keyframes agent-pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0.4), 0 4px 12px rgba(0,0,0,0.3); }
+  50% { box-shadow: 0 0 0 8px rgba(167, 139, 250, 0), 0 4px 12px rgba(0,0,0,0.3); }
+}
+
+@keyframes graph-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateX(-50%) scale(0.8) translateY(4px); }
+  to { opacity: 1; transform: translateX(-50%) scale(1) translateY(0); }
+}
+
+@keyframes bubble-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+@keyframes agent-done-flash {
+  0% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.6), 0 4px 12px rgba(0,0,0,0.3); }
+  50% { box-shadow: 0 0 0 10px rgba(74, 222, 128, 0), 0 4px 12px rgba(0,0,0,0.3); }
+  100% { box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+}
+

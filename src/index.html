@@ -172,10 +172,18 @@
       <button class="claude-history-btn" id="claude-history-btn" title="Historial">&#9776;</button>
       <button class="claude-new-btn" id="claude-new-btn" title="Nuevo chat">+</button>
       <button class="claude-maximize-btn" id="claude-maximize-btn" title="Maximizar"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 1 1 1 1 4"/><polyline points="12 1 15 1 15 4"/><polyline points="4 15 1 15 1 12"/><polyline points="12 15 15 15 15 12"/></svg></button>
+      <button class="claude-graph-btn" id="claude-graph-btn" title="Vista de agentes"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4" cy="4" r="2.5"/><circle cx="12" cy="4" r="2.5"/><circle cx="8" cy="13" r="2.5"/><line x1="4" y1="6.5" x2="8" y2="10.5"/><line x1="12" y1="6.5" x2="8" y2="10.5"/></svg></button>
       <button class="claude-minimize-btn" id="claude-minimize-btn" title="Minimizar">&#8213;</button>
       <button class="claude-close-btn" id="claude-close-btn">&times;</button>
     </div>
-    <div class="claude-messages" id="claude-messages"></div>
+    <div class="claude-body" id="claude-body">
+      <div class="claude-messages" id="claude-messages"></div>
+      <div class="claude-graph" id="claude-graph">
+        <svg class="claude-graph-svg" id="claude-graph-svg"></svg>
+        <div class="claude-graph-nodes" id="claude-graph-nodes"></div>
+        <div class="claude-graph-empty">Sin agentes activos</div>
+      </div>
+    </div>
     <div class="claude-history" id="claude-history">
       <div class="claude-history-header">
         <span class="claude-history-title">Historial de chats</span>

@@ -907,6 +907,26 @@ fn resolve_claude_binary() -> Option<String> {
         }
     }
 
+    // 5. Buscar en ~/.local/share/claude/versions/ (instalacion via curl)
+    let claude_share = PathBuf::from(&home).join(".local/share/claude/versions");
+    if claude_share.is_dir() {
+        if let Ok(entries) = fs::read_dir(&claude_share) {
+            let mut best: Option<(String, String)> = None;
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if best.as_ref().map_or(true, |(b, _)| name > *b) {
+                        best = Some((name, p.to_string_lossy().to_string()));
+                    }
+                }
+            }
+            if let Some((_, path)) = best {
+                return Some(path);
+            }
+        }
+    }
+
     None
 }
 
@@ -931,7 +951,7 @@ fn get_claude_binary() -> Result<String, String> {
             *guard = Some(path.clone());
             Ok(path)
         }
-        None => Err("Claude Code no esta instalado. Ejecuta: npm install -g @anthropic-ai/claude-code".to_string()),
+        None => Err("Claude Code no esta instalado. Instala con: curl -fsSL https://claude.ai/install.sh | sh".to_string()),
     }
 }
 
@@ -944,14 +964,14 @@ fn check_claude() -> Result<String, String> {
         .arg("--version")
         .output()
         .map_err(|_| {
-            "Claude Code no esta instalado. Ejecuta: npm install -g @anthropic-ai/claude-code"
+            "Claude Code no esta instalado. Instala con: curl -fsSL https://claude.ai/install.sh | sh"
                 .to_string()
         })?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        Err("Claude Code no esta instalado. Ejecuta: npm install -g @anthropic-ai/claude-code".to_string())
+        Err("Claude Code no esta instalado. Instala con: curl -fsSL https://claude.ai/install.sh | sh".to_string())
     }
 }
 
