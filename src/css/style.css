@@ -49,6 +49,10 @@
   --status-h: 26px;
   --sidebar-w: 240px;
   --font-size: 14px;
+
+  --sync-color: #10b981;
+  --sync-color-light: #34d399;
+  --sync-color-bg: rgba(16, 185, 129, 0.12);
 }
 
 html {
@@ -838,31 +842,31 @@ mark {
 
 /* Unsynced file indicators */
 .tree-item.unsynced .tree-icon {
-  color: #10b981;
+  color: var(--sync-color);
   opacity: 0.9;
 }
 
 .tree-item.unsynced .tree-label {
-  color: #10b981;
+  color: var(--sync-color);
 }
 
 .tree-item.unsynced:hover .tree-label,
 .tree-item.unsynced:hover .tree-icon {
-  color: #34d399;
+  color: var(--sync-color-light);
 }
 
 .tree-item.unsynced.active {
-  background: rgba(16, 185, 129, 0.12);
+  background: var(--sync-color-bg);
 }
 
 .tree-item.unsynced.active .tree-label,
 .tree-item.unsynced.active .tree-icon {
-  color: #34d399;
+  color: var(--sync-color-light);
 }
 
 /* Unsynced directory indicators */
 .tree-item.dir.unsynced .tree-badge {
-  color: #10b981;
+  color: var(--sync-color);
 }
 
 .tree-sync-badge {
@@ -870,12 +874,80 @@ mark {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #10b981;
-  background: rgba(16, 185, 129, 0.12);
+  color: var(--sync-color);
+  background: var(--sync-color-bg);
   padding: 1px 6px;
   border-radius: 8px;
   margin-left: auto;
   flex-shrink: 0;
+}
+
+/* Sync color picker */
+.settings-sync-colors {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.sync-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+  flex-shrink: 0;
+}
+
+.sync-color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.sync-color-swatch.active {
+  border-color: #fff;
+}
+
+.sync-color-custom {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px dashed var(--text-muted);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.sync-color-custom:hover {
+  transform: scale(1.15);
+  border-color: var(--text-secondary);
+}
+
+.sync-color-custom.active {
+  border-style: solid;
+  border-color: #fff;
+}
+
+.sync-color-custom-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.sync-color-custom-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  pointer-events: none;
 }
 
 /* Children indentation */

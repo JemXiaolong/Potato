@@ -1,6 +1,16 @@
 /**
  * App: logica principal, estado, atajos de teclado.
  */
+const SYNC_COLORS = [
+  { name: 'Verde',    hex: '#10b981' },
+  { name: 'Violeta',  hex: '#8b5cf6' },
+  { name: 'Azul',     hex: '#3b82f6' },
+  { name: 'Rosa',     hex: '#ec4899' },
+  { name: 'Naranja',  hex: '#f97316' },
+  { name: 'Amarillo', hex: '#eab308' },
+  { name: 'Cyan',     hex: '#06b6d4' },
+];
+
 const App = {
   // Estado
   state: {
@@ -1125,19 +1135,85 @@ const App = {
     }
   },
 
+  _applySyncColor(hex) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    // Variante clara: blend 30% hacia blanco
+    const lr = Math.round(r + (255 - r) * 0.3);
+    const lg = Math.round(g + (255 - g) * 0.3);
+    const lb = Math.round(b + (255 - b) * 0.3);
+    const light = `#${lr.toString(16).padStart(2,'0')}${lg.toString(16).padStart(2,'0')}${lb.toString(16).padStart(2,'0')}`;
+    const bg = `rgba(${r}, ${g}, ${b}, 0.12)`;
+    const s = document.documentElement.style;
+    s.setProperty('--sync-color', hex);
+    s.setProperty('--sync-color-light', light);
+    s.setProperty('--sync-color-bg', bg);
+  },
+
   _loadSettings() {
     // Sync indicators
     const storedSync = localStorage.getItem('potato-sync-indicators');
     this.state.syncIndicators = storedSync === null ? true : storedSync === 'true';
 
     const syncToggle = document.getElementById('setting-sync-indicators');
+    const syncColorRow = document.getElementById('setting-sync-color-row');
     if (syncToggle) {
       syncToggle.checked = this.state.syncIndicators;
       syncToggle.addEventListener('change', () => {
         this.state.syncIndicators = syncToggle.checked;
         localStorage.setItem('potato-sync-indicators', syncToggle.checked);
+        if (syncColorRow) syncColorRow.style.display = syncToggle.checked ? '' : 'none';
         this.refreshVault();
       });
+    }
+
+    // Sync color
+    const savedColor = localStorage.getItem('potato-sync-color') || '#10b981';
+    this._applySyncColor(savedColor);
+
+    if (syncColorRow) {
+      syncColorRow.style.display = this.state.syncIndicators ? '' : 'none';
+      const container = document.getElementById('sync-color-swatches');
+      if (container) {
+        container.innerHTML = '';
+        SYNC_COLORS.forEach(c => {
+          const sw = document.createElement('div');
+          sw.className = 'sync-color-swatch' + (c.hex === savedColor ? ' active' : '');
+          sw.style.background = c.hex;
+          sw.title = c.name;
+          sw.addEventListener('click', () => {
+            container.querySelectorAll('.sync-color-swatch, .sync-color-custom').forEach(el => el.classList.remove('active'));
+            sw.classList.add('active');
+            this._applySyncColor(c.hex);
+            localStorage.setItem('potato-sync-color', c.hex);
+          });
+          container.appendChild(sw);
+        });
+        // Custom color picker
+        const isCustom = !SYNC_COLORS.some(c => c.hex === savedColor);
+        const custom = document.createElement('div');
+        custom.className = 'sync-color-custom' + (isCustom ? ' active' : '');
+        custom.title = 'Color personalizado';
+        const dot = document.createElement('div');
+        dot.className = 'sync-color-custom-dot';
+        if (isCustom) dot.style.background = savedColor;
+        custom.appendChild(dot);
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.className = 'sync-color-custom-input';
+        input.value = savedColor;
+        input.addEventListener('input', (e) => {
+          const hex = e.target.value;
+          container.querySelectorAll('.sync-color-swatch, .sync-color-custom').forEach(el => el.classList.remove('active'));
+          custom.classList.add('active');
+          dot.style.background = hex;
+          this._applySyncColor(hex);
+          localStorage.setItem('potato-sync-color', hex);
+        });
+        custom.appendChild(input);
+        container.appendChild(custom);
+      }
     }
 
     // Auto-save
@@ -1176,6 +1252,8 @@ const App = {
     // Sync toggle states with current values
     const syncToggle = document.getElementById('setting-sync-indicators');
     if (syncToggle) syncToggle.checked = this.state.syncIndicators;
+    const syncColorRow = document.getElementById('setting-sync-color-row');
+    if (syncColorRow) syncColorRow.style.display = this.state.syncIndicators ? '' : 'none';
     const autosaveToggle = document.getElementById('setting-autosave');
     if (autosaveToggle) autosaveToggle.checked = this.state.autosave;
     const tocToggle = document.getElementById('setting-toc');
@@ -1600,7 +1678,7 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.17.0',
+  _appVersion: '0.18.0',
 
   async _checkForUpdates() {
     try {
