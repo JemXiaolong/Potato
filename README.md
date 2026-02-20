@@ -47,7 +47,7 @@ ssh -T git@github.com  # Verificar conexion
 ### Desde .deb (usuarios)
 
 ```bash
-sudo dpkg -i POTATO_0.17.0_amd64.deb
+sudo dpkg -i POTATO_0.18.2_amd64.deb
 ```
 
 Si marca error de dependencias:
@@ -55,6 +55,8 @@ Si marca error de dependencias:
 ```bash
 sudo apt --fix-broken install
 ```
+
+Las siguientes actualizaciones se instalan directamente desde la app (ver [Auto-update](#auto-update)).
 
 Para desinstalar:
 
@@ -87,12 +89,25 @@ npm run build
 ```
 
 Genera los instaladores en `src-tauri/target/release/bundle/`:
-- `deb/POTATO_0.17.0_amd64.deb`
-- `appimage/POTATO_0.17.0_amd64.AppImage`
+- `deb/POTATO_X.Y.Z_amd64.deb`
+- `appimage/POTATO_X.Y.Z_amd64.AppImage`
+
+## Auto-update
+
+POTATO detecta actualizaciones automaticamente al iniciar y cada 5 minutos, consultando la API de GitHub Releases. Cuando hay una nueva version:
+
+1. Aparece un banner: "Nueva version vX.Y.Z disponible **[Actualizar]**"
+2. Al hacer click en "Actualizar":
+   - Descarga el `.deb` con progreso en tiempo real en el boton
+   - Pide contraseña con dialogo grafico (PolicyKit/pkexec)
+   - Instala con `dpkg -i`
+   - Reinicia la app automaticamente
+
+Si el usuario cancela la contraseña o hay un error de red, el boton vuelve a "Actualizar" y se muestra el error en la barra de estado.
 
 ## Publicar una nueva version
 
-POTATO detecta actualizaciones automaticamente al iniciar, consultando la API publica de GitHub Releases. Para que la deteccion funcione correctamente:
+Para que los usuarios reciban la actualizacion automatica:
 
 1. Actualizar la version en los 4 archivos:
    - `package.json`
@@ -105,16 +120,22 @@ POTATO detecta actualizaciones automaticamente al iniciar, consultando la API pu
    npm run build
    ```
 
-3. Crear el release en GitHub con tag semver (el prefijo `v` es opcional):
+3. Crear tag y release en GitHub:
    ```bash
-   gh release create v0.X.0 \
-     --title "POTATO v0.X.0" \
+   git tag v0.X.Y
+   git push origin v0.X.Y
+
+   gh release create v0.X.Y \
+     --title "v0.X.Y" \
      --notes "Descripcion del release" \
-     src-tauri/target/release/bundle/deb/POTATO_0.X.0_amd64.deb \
-     src-tauri/target/release/bundle/appimage/POTATO_0.X.0_amd64.AppImage
+     src-tauri/target/release/bundle/deb/POTATO_0.X.Y_amd64.deb \
+     src-tauri/target/release/bundle/appimage/POTATO_0.X.Y_amd64.AppImage
    ```
 
-> **Importante:** El release NO debe estar marcado como pre-release ni como draft. La API `/releases/latest` solo devuelve releases publicados. El `tag_name` debe ser una version mayor a la de `_appVersion` en `app.js`.
+> **Importante:**
+> - El release NO debe estar marcado como pre-release ni como draft. La API `/releases/latest` solo devuelve releases publicados.
+> - El `tag_name` debe ser una version mayor a la de `_appVersion` en `app.js`.
+> - El release debe incluir un asset `.deb` para que el auto-update funcione. Si no hay `.deb`, el boton abrira la URL del release en el navegador.
 
 ## Atajos de teclado
 
@@ -165,7 +186,7 @@ potato --help      # Muestra la ayuda
 - Persistencia de sesion (recuerda vault y nota al reabrir)
 - Fuente Nunito integrada
 - Asistente IA integrado (Claude Code) con agentes, historial y modo vault/proyecto
-- Notificacion de actualizacion desde GitHub Releases
+- Auto-update: descarga, instala y reinicia desde el banner de actualizacion
 - CLI: `--version` y `--help`
 
 ## Ajustes
