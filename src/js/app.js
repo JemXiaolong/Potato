@@ -120,8 +120,9 @@ const App = {
       this._showWelcome();
     }
 
-    // Check for updates (non-blocking)
+    // Check for updates (non-blocking, every 5 min)
     this._checkForUpdates();
+    setInterval(() => this._checkForUpdates(), 5 * 60 * 1000);
   },
 
   // -- Session -------------------------------------------------------------
@@ -1686,7 +1687,7 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.18.0',
+  _appVersion: '0.18.1',
   _updateUrl: null,
 
   async _checkForUpdates() {

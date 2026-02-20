@@ -1443,7 +1443,15 @@ async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     let exe = std::env::current_exe()
         .map_err(|e| format!("No se pudo obtener la ruta del ejecutable: {}", e))?;
 
-    std::process::Command::new(&exe)
+    // After dpkg -i replaces the binary, /proc/self/exe points to "path (deleted)"
+    let exe_str = exe.to_string_lossy().to_string();
+    let exe_path = if exe_str.ends_with(" (deleted)") {
+        PathBuf::from(exe_str.trim_end_matches(" (deleted)"))
+    } else {
+        exe
+    };
+
+    std::process::Command::new(&exe_path)
         .spawn()
         .map_err(|e| format!("No se pudo reiniciar la app: {}", e))?;
 
