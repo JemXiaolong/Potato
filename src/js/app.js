@@ -1675,6 +1675,7 @@ const App = {
       + '<div class="welcome-row"><kbd>Ctrl+P</kbd><span>Buscar</span></div>'
       + '</div>'
       + '<p class="welcome-credit">Developed by JemXiaoLong</p>'
+      + '<p class="welcome-version">v' + this._appVersion + '</p>'
       + '</div>';
 
     // Mostrar directamente en preview sin pasar por markdown
@@ -1687,7 +1688,7 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.18.1',
+  _appVersion: '0.18.2',
   _updateUrl: null,
 
   async _checkForUpdates() {

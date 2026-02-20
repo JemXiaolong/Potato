@@ -1,6 +1,6 @@
 {
   "productName": "POTATO",
-  "version": "0.18.1",
+  "version": "0.18.2",
   "identifier": "com.potato.app",
   "build": {
     "frontendDist": "../src"
