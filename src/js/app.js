@@ -1307,6 +1307,14 @@ const App = {
         const { phase, percent } = event.payload;
         this._updateProgress(phase, percent);
       });
+
+      window.__TAURI__.event.listen('update-progress', (event) => {
+        const { percent } = event.payload;
+        const btn = document.getElementById('update-link');
+        if (btn && btn.disabled) {
+          btn.textContent = 'Descargando ' + percent + '%...';
+        }
+      });
     }
   },
 
@@ -1679,6 +1687,7 @@ const App = {
   // -- Updates ---------------------------------------------------------------
 
   _appVersion: '0.18.0',
+  _updateUrl: null,
 
   async _checkForUpdates() {
     try {
@@ -1722,12 +1731,14 @@ const App = {
   },
 
   _showUpdateBanner(version, url) {
+    this._updateUrl = url;
     const banner = document.getElementById('update-banner');
+    const btn = document.getElementById('update-link');
     document.getElementById('update-version').textContent = 'v' + version;
 
-    document.getElementById('update-link').onclick = () => {
-      this.invoke('open_in_explorer', { path: url });
-    };
+    btn.textContent = 'Actualizar';
+    btn.disabled = false;
+    btn.onclick = () => this._startAutoUpdate();
 
     document.getElementById('update-close').onclick = () => {
       banner.classList.add('hidden');
@@ -1735,6 +1746,43 @@ const App = {
     };
 
     banner.classList.remove('hidden');
+  },
+
+  async _startAutoUpdate() {
+    const btn = document.getElementById('update-link');
+    const closeBtn = document.getElementById('update-close');
+
+    // Disable button and hide close
+    btn.disabled = true;
+    btn.textContent = 'Descargando 0%...';
+    closeBtn.style.display = 'none';
+
+    try {
+      // Step 1: Download
+      const path = await this.invoke('download_update', { url: this._updateUrl });
+
+      // Step 2: Install
+      btn.textContent = 'Instalando...';
+      await this.invoke('install_update', { path });
+
+      // Step 3: Restart
+      btn.textContent = 'Reiniciando...';
+      await this.invoke('restart_app');
+
+    } catch (err) {
+      // Restore button on error
+      btn.disabled = false;
+      btn.textContent = 'Actualizar';
+      closeBtn.style.display = '';
+      this._setStatus(typeof err === 'string' ? err : 'Error al actualizar');
+      setTimeout(() => {
+        if (this.state.currentNote) {
+          this._setStatus(this.state.currentNote.title);
+        } else if (this.state.vaultPath) {
+          this._setStatus(this.state.vaultPath);
+        }
+      }, 5000);
+    }
   },
 };
 

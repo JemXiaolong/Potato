@@ -503,6 +503,11 @@ mark {
   opacity: 0.85;
 }
 
+.update-link:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .update-close {
   background: none;
   border: none;
@@ -904,33 +909,33 @@ mark {
   transform: scale(1.15);
 }
 
-.sync-color-swatch.active {
-  border-color: #fff;
+.sync-color-swatch.active { 
+  border-color: #fff; 
+} 
+
+.sync-color-custom { 
+  width: 22px; 
+  height: 22px; 
+  border-radius: 50%; 
+  cursor: pointer; 
+  border: 2px dashed var(--text-muted); 
+  position: relative; 
+  display: flex; 
+  align-items: center; 
+  justify-content: center; 
+  flex-shrink: 0; 
+  transition: transform 0.12s ease, border-color 0.12s ease; 
 }
 
-.sync-color-custom {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px dashed var(--text-muted);
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: transform 0.12s ease, border-color 0.12s ease;
-}
+.sync-color-custom:hover { 
+  transform: scale(1.15); 
+  border-color: var(--text-secondary); 
+} 
 
-.sync-color-custom:hover {
-  transform: scale(1.15);
-  border-color: var(--text-secondary);
-}
-
-.sync-color-custom.active {
-  border-style: solid;
-  border-color: #fff;
-}
+.sync-color-custom.active { 
+  border-style: solid; 
+  border-color: #fff; 
+} 
 
 .sync-color-custom-input {
   position: absolute;

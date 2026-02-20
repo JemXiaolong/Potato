@@ -1342,6 +1342,116 @@ fn stop_claude(process_id: String) -> Result<(), String> {
     claude_stop(&process_id)
 }
 
+// -- Update: Auto-update commands --------------------------------------------
+
+#[derive(Serialize, Clone)]
+struct UpdateProgress {
+    phase: String,
+    percent: u32,
+}
+
+#[tauri::command]
+async fn download_update(app: tauri::AppHandle, url: String) -> Result<String, String> {
+    let app_handle = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let dest = "/tmp/potato-update.deb";
+
+        // Remove previous download if exists
+        let _ = fs::remove_file(dest);
+
+        let mut child = std::process::Command::new("curl")
+            .args(["-L", "-f", "-o", dest, "--progress-bar", &url])
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("No se pudo ejecutar curl: {}", e))?;
+
+        // Parse stderr byte by byte for progress (curl uses \r for progress bar)
+        if let Some(stderr) = child.stderr.take() {
+            let re = Regex::new(r"(\d+)\.?\d*%").unwrap();
+            let mut line_buf = String::new();
+            let mut last_emitted: u32 = 0;
+
+            for byte in stderr.bytes().flatten() {
+                if byte == b'\r' || byte == b'\n' {
+                    if !line_buf.is_empty() {
+                        if let Some(caps) = re.captures(&line_buf) {
+                            if let Ok(pct) = caps[1].parse::<u32>() {
+                                let pct = pct.min(100);
+                                if pct >= last_emitted + 2 || pct == 100 {
+                                    last_emitted = pct;
+                                    let _ = app_handle.emit("update-progress", UpdateProgress {
+                                        phase: "Descargando".to_string(),
+                                        percent: pct,
+                                    });
+                                }
+                            }
+                        }
+                        line_buf.clear();
+                    }
+                } else {
+                    line_buf.push(byte as char);
+                }
+            }
+        }
+
+        let status = child.wait().map_err(|e| format!("Error esperando curl: {}", e))?;
+
+        if status.success() && PathBuf::from(dest).exists() {
+            Ok(dest.to_string())
+        } else {
+            let _ = fs::remove_file(dest);
+            Err("Error al descargar la actualizacion. Verifica tu conexion a internet.".to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+async fn install_update(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !PathBuf::from(&path).exists() {
+            return Err("Archivo de actualizacion no encontrado.".to_string());
+        }
+
+        let output = std::process::Command::new("pkexec")
+            .args(["dpkg", "-i", &path])
+            .output()
+            .map_err(|e| format!("No se pudo ejecutar pkexec: {}", e))?;
+
+        // Clean up temp file regardless of result
+        let _ = fs::remove_file(&path);
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            if stderr.contains("dismissed") || stderr.contains("Not authorized") || output.status.code() == Some(126) {
+                Err("Instalacion cancelada por el usuario.".to_string())
+            } else {
+                Err(format!("Error al instalar: {}", stderr))
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[tauri::command]
+async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("No se pudo obtener la ruta del ejecutable: {}", e))?;
+
+    std::process::Command::new(&exe)
+        .spawn()
+        .map_err(|e| format!("No se pudo reiniciar la app: {}", e))?;
+
+    app.exit(0);
+
+    Ok(())
+}
+
 // -- App ---------------------------------------------------------------------
 
 pub fn run() {
@@ -1372,6 +1482,9 @@ pub fn run() {
             list_claude_agents,
             list_claude_commands,
             read_claude_command,
+            download_update,
+            install_update,
+            restart_app,
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");
