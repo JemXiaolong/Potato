@@ -1700,6 +1700,14 @@ mark {
   letter-spacing: 0.5px;
 }
 
+.welcome-version {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.714rem;
+  color: var(--text-muted);
+  opacity: 0.35;
+}
+
 /* === Preview Markdown Styles === */
 .preview h1, .preview h2, .preview h3,
 .preview h4, .preview h5, .preview h6 {
