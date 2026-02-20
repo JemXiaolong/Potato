@@ -1688,7 +1688,7 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.18.2',
+  _appVersion: '0.18.3',
   _updateUrl: null,
 
   async _checkForUpdates() {
