@@ -1135,21 +1135,21 @@ const App = {
     }
   },
 
-  _applySyncColor(hex) {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    // Variante clara: blend 30% hacia blanco
-    const lr = Math.round(r + (255 - r) * 0.3);
-    const lg = Math.round(g + (255 - g) * 0.3);
-    const lb = Math.round(b + (255 - b) * 0.3);
-    const light = `#${lr.toString(16).padStart(2,'0')}${lg.toString(16).padStart(2,'0')}${lb.toString(16).padStart(2,'0')}`;
-    const bg = `rgba(${r}, ${g}, ${b}, 0.12)`;
-    const s = document.documentElement.style;
-    s.setProperty('--sync-color', hex);
-    s.setProperty('--sync-color-light', light);
-    s.setProperty('--sync-color-bg', bg);
-  },
+  _applySyncColor(hex) { 
+    const r = parseInt(hex.slice(1, 3), 16); 
+    const g = parseInt(hex.slice(3, 5), 16); 
+    const b = parseInt(hex.slice(5, 7), 16); 
+    // Variante clara: blend 30% hacia blanco 
+    const lr = Math.round(r + (255 - r) * 0.3); 
+    const lg = Math.round(g + (255 - g) * 0.3); 
+    const lb = Math.round(b + (255 - b) * 0.3); 
+    const light = `#${lr.toString(16).padStart(2,'0')}${lg.toString(16).padStart(2,'0')}${lb.toString(16).padStart(2,'0')}`; 
+    const bg = `rgba(${r}, ${g}, ${b}, 0.12)`; 
+    const s = document.documentElement.style; 
+    s.setProperty('--sync-color', hex); 
+    s.setProperty('--sync-color-light', light); 
+    s.setProperty('--sync-color-bg', bg); 
+  }, 
 
   _loadSettings() {
     // Sync indicators
@@ -1698,8 +1698,14 @@ const App = {
       const dismissed = localStorage.getItem('potato-update-dismissed');
       if (dismissed === latest) return;
 
+      // Buscar asset descargable (.deb o .AppImage)
+      const assets = data.assets || [];
+      const deb = assets.find(a => a.name.endsWith('.deb'));
+      const appimage = assets.find(a => a.name.endsWith('.AppImage'));
+      const downloadUrl = (deb || appimage || {}).browser_download_url || data.html_url;
+
       // Mostrar banner
-      this._showUpdateBanner(latest, data.html_url);
+      this._showUpdateBanner(latest, downloadUrl);
     } catch (_) {
       // Silenciar errores de red — no es crítico
     }
