@@ -8,6 +8,7 @@ use std::process::Stdio;
 use std::sync::Mutex;
 use tauri::ipc::Channel;
 use tauri::Emitter;
+use walkdir::WalkDir;
 
 #[derive(Serialize, Clone)]
 pub struct FileEntry {
@@ -21,6 +22,23 @@ pub struct FileEntry {
 pub struct WikiLink {
     target: String,
     display: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct McpServerInfo {
+    name: String,
+    source_path: String,
+    source_dir: String,
+    server_type: String,
+    command: Option<String>,
+    url: Option<String>,
+    config: serde_json::Value,
+}
+
+#[derive(Serialize, Clone)]
+struct McpScanResult {
+    servers: Vec<McpServerInfo>,
+    scan_time_ms: u64,
 }
 
 // -- Comandos: Vault ---------------------------------------------------------
@@ -600,6 +618,120 @@ fn open_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// -- MCP: Escanear servidores ------------------------------------------------
+
+#[tauri::command]
+async fn scan_mcp_servers() -> Result<McpScanResult, String> {
+    tokio::task::spawn_blocking(|| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if home.is_empty() {
+            return Ok(McpScanResult { servers: vec![], scan_time_ms: 0 });
+        }
+
+        let start = std::time::Instant::now();
+        let exclude_dirs: std::collections::HashSet<&str> = [
+            ".git", "node_modules", ".cache", ".local", ".cargo", "target",
+            ".claude", ".npm", ".nvm", ".rustup", "__pycache__", "venv",
+            "dist", "build", "snap", ".venv", ".tox", ".mypy_cache",
+        ].iter().cloned().collect();
+
+        let mut servers = Vec::new();
+
+        for entry in WalkDir::new(&home)
+            .max_depth(6)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    let name = e.file_name().to_string_lossy();
+                    // Permitir el home dir raiz
+                    if e.depth() == 0 { return true; }
+                    // Excluir directorios ocultos (excepto .mcp.json que es archivo)
+                    if name.starts_with('.') && name != ".mcp.json" { return false; }
+                    !exclude_dirs.contains(name.as_ref())
+                } else {
+                    true
+                }
+            })
+        {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let file_name = entry.file_name().to_string_lossy();
+            if file_name != ".mcp.json" {
+                continue;
+            }
+
+            let path = entry.path();
+            let source_path = path.to_string_lossy().to_string();
+            let source_dir = path.parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            let content = match fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let parsed: serde_json::Value = match serde_json::from_str(&content) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let mcp_servers = match parsed.get("mcpServers").and_then(|v| v.as_object()) {
+                Some(obj) => obj,
+                None => continue,
+            };
+
+            for (name, config) in mcp_servers {
+                let server_type = config.get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("stdio")
+                    .to_string();
+
+                let command = config.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| {
+                        let mut parts = vec![c.to_string()];
+                        if let Some(args) = config.get("args").and_then(|a| a.as_array()) {
+                            for arg in args {
+                                if let Some(s) = arg.as_str() {
+                                    parts.push(s.to_string());
+                                }
+                            }
+                        }
+                        parts.join(" ")
+                    });
+
+                let url = config.get("url")
+                    .and_then(|u| u.as_str())
+                    .map(|u| u.to_string());
+
+                servers.push(McpServerInfo {
+                    name: name.clone(),
+                    source_path: source_path.clone(),
+                    source_dir: source_dir.clone(),
+                    server_type,
+                    command,
+                    url,
+                    config: config.clone(),
+                });
+            }
+        }
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        Ok(McpScanResult { servers, scan_time_ms: elapsed })
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
 // -- Claude: Listar agentes --------------------------------------------------
 
 #[derive(Serialize, Clone)]
@@ -984,6 +1116,7 @@ async fn send_claude_message(
     working_dir: Option<String>,
     allowed_tools: Option<Vec<String>>,
     system_prompt: Option<String>,
+    mcp_config_json: Option<String>,
     on_event: Channel<StreamChunk>,
 ) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
@@ -993,8 +1126,22 @@ async fn send_claude_message(
             "--output-format".to_string(),
             "stream-json".to_string(),
             "--include-partial-messages".to_string(),
-            "--dangerously-skip-permissions".to_string(),
         ];
+
+        // MCP config: escribir a archivo temporal y pasar la ruta
+        // Colocar ANTES de --dangerously-skip-permissions para que ese flag
+        // termine la coleccion variadic de --mcp-config
+        let _mcp_temp_file: Option<std::path::PathBuf> = if let Some(ref mcp_json) = mcp_config_json {
+            let tmp_path = std::env::temp_dir().join(format!("potato-mcp-{}.json", process_id));
+            fs::write(&tmp_path, mcp_json).map_err(|e| format!("Error escribiendo MCP config: {}", e))?;
+            args.push("--mcp-config".to_string());
+            args.push(tmp_path.to_string_lossy().to_string());
+            Some(tmp_path)
+        } else {
+            None
+        };
+
+        args.push("--dangerously-skip-permissions".to_string());
 
         if let Some(ref sid) = session_id {
             args.push("--resume".to_string());
@@ -1308,6 +1455,11 @@ async fn send_claude_message(
         let status = child.wait().map_err(|e| e.to_string())?;
         let stderr_output = stderr_thread.join().unwrap_or_default();
 
+        // Limpiar archivo temporal MCP
+        if let Some(ref tmp) = _mcp_temp_file {
+            let _ = fs::remove_file(tmp);
+        }
+
         claude_unregister(&process_id);
 
         let _ = on_event.send(StreamChunk {
@@ -1490,6 +1642,7 @@ pub fn run() {
             list_claude_agents,
             list_claude_commands,
             read_claude_command,
+            scan_mcp_servers,
             download_update,
             install_update,
             restart_app,

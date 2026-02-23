@@ -998,15 +998,6 @@ mark {
   color: var(--text-muted);
 }
 
-.settings-section-title {
-  font-size: 0.786rem;
-  font-weight: 600;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-}
-
 .settings-row-path {
   font-size: 0.714rem;
   font-family: var(--font-mono);
@@ -1057,6 +1048,82 @@ mark {
 }
 .settings-path-input::placeholder {
   color: var(--text-muted);
+}
+
+/* Settings section title with icon */
+.settings-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.786rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+.settings-section-icon {
+  opacity: 0.8;
+}
+
+/* MCP server list */
+.settings-mcp-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-top: 6px;
+}
+.settings-mcp-empty {
+  padding: 18px 14px;
+  text-align: center;
+  font-size: 0.786rem;
+  color: var(--text-muted);
+}
+.settings-mcp-group-header {
+  font-size: 0.714rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--bg-elevated);
+  padding: 4px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+}
+.settings-mcp-server {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-mcp-server:last-child {
+  border-bottom: none;
+}
+.settings-mcp-server-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.settings-mcp-server-name {
+  font-size: 0.857rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-mcp-server-meta {
+  font-size: 0.714rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Toggle switch */
@@ -1151,6 +1218,115 @@ mark {
   content: '○';
   font-size: 0.571rem;
   opacity: 0.5;
+}
+
+/* What's New Modal */
+.modal.whatsnew {
+  width: 420px;
+}
+
+.whatsnew-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  min-height: 200px;
+  text-align: center;
+  justify-content: center;
+}
+
+.whatsnew-step.hidden {
+  display: none;
+}
+
+.whatsnew-icon {
+  font-size: 3rem;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.whatsnew-icon svg {
+  stroke: var(--accent);
+}
+
+.whatsnew-title {
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--text-primary);
+}
+
+.whatsnew-desc {
+  font-size: 0.857rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 340px;
+  margin: 0 auto;
+}
+
+.whatsnew-desc code {
+  background: var(--bg-elevated);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.786rem;
+}
+
+.whatsnew-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  margin-top: 8px;
+}
+
+.whatsnew-steps-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.857rem;
+  color: var(--text-secondary);
+}
+
+.whatsnew-step-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.714rem;
+  font-weight: 700;
+}
+
+.whatsnew-footer {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.whatsnew-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.whatsnew-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-light);
+  transition: background 0.2s;
+}
+
+.whatsnew-dot.active {
+  background: var(--accent);
+}
+
+.whatsnew-nav {
+  display: flex;
+  gap: 8px;
 }
 
 /* Drag & Drop */

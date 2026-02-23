@@ -28,6 +28,9 @@ const Claude = {
     graphView: false,
     graphNodes: [],      // [{id, name, desc, status}]
     _agentTimers: {},    // {tool_id: timeoutId} — debounce per agent
+    mcpServers: [],      // McpServerInfo[] del ultimo scan
+    mcpSelected: [],     // string[] nombres habilitados
+    mcpScanning: false,
   },
 
   invoke: null,
@@ -129,6 +132,18 @@ const Claude = {
       this.state.agentsOnly = e.target.checked;
       localStorage.setItem('potato-claude-agents-only', e.target.checked);
     });
+
+    // MCP servers - load saved scan results and selection
+    try {
+      const savedMcp = localStorage.getItem('potato-mcp-scan-results');
+      if (savedMcp) this.state.mcpServers = JSON.parse(savedMcp);
+    } catch (_) {}
+    try {
+      const savedSel = localStorage.getItem('potato-mcp-selected');
+      if (savedSel) this.state.mcpSelected = JSON.parse(savedSel);
+    } catch (_) {}
+
+    document.getElementById('setting-mcp-scan-btn').addEventListener('click', () => this._scanMcpServers());
 
     // Commands directory - load saved + listeners
     this.state.commandsDir = localStorage.getItem('potato-claude-commandsdir') || null;
@@ -356,7 +371,11 @@ const Claude = {
     parts.push('2. Si el usuario menciona @nombre → usa ese agente.');
     parts.push('3. Si no menciona agente → elige el mas adecuado de la lista.');
     parts.push('4. NUNCA uses Glob, Grep, Read, WebSearch, WebFetch directamente. Delega.');
-    parts.push('5. NUNCA uses Bash, Write, Edit, MCP.');
+    if (this.state.mcpSelected.length > 0) {
+      parts.push('5. NUNCA uses Bash, Write, Edit. Las herramientas MCP SI estan permitidas (' + this.state.mcpSelected.join(', ') + ').');
+    } else {
+      parts.push('5. NUNCA uses Bash, Write, Edit, MCP.');
+    }
     parts.push('');
     parts.push('CONTEXTO OBLIGATORIO AL DELEGAR:');
     parts.push('Cuando uses Task, SIEMPRE incluye en el prompt del agente TODO este contexto:');
@@ -409,9 +428,20 @@ const Claude = {
     parts.push('- Glob, Grep, Read: buscar y leer archivos en el vault.');
     parts.push('- WebSearch, WebFetch: investigar en internet.');
     parts.push('- Task: delegar a agentes especializados.');
+
+    // MCP servers habilitados
+    const mcpNames = this.state.mcpSelected;
+    if (mcpNames.length > 0) {
+      parts.push('- MCP Tools: herramientas de servidores externos (' + mcpNames.join(', ') + '). Usalas cuando el usuario pida datos de esos servicios.');
+    }
+
     parts.push('');
     parts.push('REGLAS:');
-    parts.push('1. NUNCA uses Bash, Write, Edit, MCP ni herramientas no listadas.');
+    if (mcpNames.length > 0) {
+      parts.push('1. NUNCA uses Bash, Write, Edit ni herramientas no listadas. Las herramientas MCP SI estan permitidas.');
+    } else {
+      parts.push('1. NUNCA uses Bash, Write, Edit, MCP ni herramientas no listadas.');
+    }
     parts.push('2. SIEMPRE que menciones un archivo, incluye su RUTA ABSOLUTA COMPLETA.');
     parts.push('3. Responde en español. Se conciso y util.');
 
@@ -587,6 +617,7 @@ const Claude = {
     if (!this._silent) {
       this.state.messages.push({ role: 'user', content: displayText });
       this._addUserMessage(displayText);
+      this._vaultRetryCount = 0;
     }
     this._silent = false;
 
@@ -621,13 +652,15 @@ const Claude = {
           if (this.state.mode === 'vault') {
             const vaultAuto = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Task'];
             const vaultReview = ['Write', 'Edit'];
+            const isMcpTool = chunk.tool.tool_name.startsWith('mcp__');
 
             if (vaultReview.includes(chunk.tool.tool_name)) {
               // Write/Edit en vault: verificar que la ruta esté dentro del vault
               const filePath = chunk.tool.input?.file_path || '';
               if (App.state.vaultPath && !filePath.startsWith(App.state.vaultPath)) {
-                // Fuera del vault → rechazar silenciosamente
-                this._vaultRetry();
+                // Fuera del vault → rechazar
+                this._showAutoRejected(chunk.tool);
+                this._vaultRetry(chunk.tool.tool_name);
                 return;
               }
               // Dentro del vault → mostrar preview para aprobación individual
@@ -637,9 +670,18 @@ const Claude = {
               return;
             }
 
+            if (isMcpTool) {
+              // MCP tools → mostrar aprobación individual (servicios externos, pueden ser destructivos)
+              this.state.isStreaming = false;
+              this._setStreamingUI(false);
+              this._showToolApproval(chunk.tool);
+              return;
+            }
+
             if (!vaultAuto.includes(chunk.tool.tool_name)) {
-              // Tool no permitido → auto-rechazar
-              this._vaultRetry();
+              // Tool no permitido en vault → auto-rechazar
+              this._showAutoRejected(chunk.tool);
+              this._vaultRetry(chunk.tool.tool_name);
               return;
             }
           }
@@ -714,6 +756,9 @@ const Claude = {
       systemPrompt = this._buildVaultSystemPrompt();
     }
 
+    // MCP config
+    const mcpConfigJson = this._getMcpConfigJson();
+
     try {
       await this.invoke('send_claude_message', {
         message: finalMessage,
@@ -723,6 +768,7 @@ const Claude = {
         workingDir: this._getWorkingDir(),
         allowedTools,
         systemPrompt,
+        mcpConfigJson,
         onEvent: channel,
       });
     } catch (err) {
@@ -868,20 +914,39 @@ const Claude = {
     this._scrollToBottom();
   },
 
-  _vaultRetry() {
+  _vaultRetryCount: 0,
+
+  _vaultRetry(rejectedTool) {
     const lastUserMsg = [...this.state.messages].reverse().find(m => m.role === 'user');
     if (!lastUserMsg) return;
+
+    // Limitar reintentos para evitar loops infinitos
+    this._vaultRetryCount++;
+    if (this._vaultRetryCount > 2) {
+      this._vaultRetryCount = 0;
+      this.state.isStreaming = false;
+      this._setStreamingUI(false);
+      this._showError('No se pudo completar la solicitud. Claude intenta usar herramientas no disponibles en modo vault.');
+      return;
+    }
 
     // Resetear estado de streaming y sesion
     this.state.isStreaming = false;
     this._setStreamingUI(false);
     this.state.sessionId = null;
     this.state.claudeSessionId = null;
-    this.state.sessionApprovedTools = [];
+    // Preservar herramientas MCP aprobadas por el usuario
+    this.state.sessionApprovedTools = this.state.sessionApprovedTools.filter(t => t.startsWith('mcp__'));
 
-    // Reenviar silenciosamente — el system prompt dinámico ya tiene las reglas
+    // Reenviar con contexto de la herramienta rechazada
+    const mcpNote = this.state.mcpSelected.length > 0
+      ? ' Las herramientas MCP SI estan permitidas.'
+      : '';
+    const toolNote = rejectedTool
+      ? `\n\n[SISTEMA: ${rejectedTool} NO esta disponible. Solo puedes usar: Glob, Grep, Read, WebSearch, WebFetch, Task.${mcpNote} Responde con las herramientas disponibles o con tu conocimiento.]`
+      : '';
     this._silent = true;
-    this._inputEl.value = lastUserMsg.content;
+    this._inputEl.value = lastUserMsg.content + toolNote;
     this.sendMessage();
   },
 
@@ -1094,8 +1159,24 @@ const Claude = {
         break;
       }
       default: {
-        const label = this._toolLabel(tool.tool_name, inp);
-        if (label) summaryHtml = `<div class="claude-approval-desc">${this._escapeHtml(label)}</div>`;
+        if (tool.tool_name.startsWith('mcp__')) {
+          // MCP tools: mostrar servidor, operación y parámetros
+          const parts = tool.tool_name.split('__');
+          const serverName = parts[1] || 'desconocido';
+          const toolAction = parts.slice(2).join('__') || 'operacion';
+          summaryHtml = `<div class="claude-approval-desc">Servidor: <strong>${this._escapeHtml(serverName)}</strong></div>`;
+          summaryHtml += `<div class="claude-approval-desc">Operacion: <strong>${this._escapeHtml(toolAction)}</strong></div>`;
+          const paramStr = JSON.stringify(inp, null, 2);
+          if (paramStr && paramStr !== '{}') {
+            const lines = paramStr.split('\n');
+            const preview = lines.slice(0, 15).join('\n');
+            const suffix = lines.length > 15 ? '\n...' : '';
+            summaryHtml += `<pre class="claude-approval-cmd">${this._escapeHtml(preview + suffix)}</pre>`;
+          }
+        } else {
+          const label = this._toolLabel(tool.tool_name, inp);
+          if (label) summaryHtml = `<div class="claude-approval-desc">${this._escapeHtml(label)}</div>`;
+        }
       }
     }
 
@@ -1247,6 +1328,8 @@ const Claude = {
     const inp = tool.input || {};
     let details = '';
 
+    const isMcpTool = tool.tool_name.startsWith('mcp__');
+
     switch (tool.tool_name) {
       case 'Write':
         details = `Crea el archivo "${inp.file_path}" con exactamente el mismo contenido que ibas a escribir. Hazlo ahora.`;
@@ -1265,7 +1348,21 @@ const Claude = {
         }
     }
 
-    this._inputEl.value = `APROBADO. ${details}`;
+    if (isMcpTool) {
+      // MCP tools: sesion fresca (--resume rompe las conexiones MCP)
+      // Agregar a sessionApprovedTools para que la nueva sesion no pida permiso otra vez
+      if (!this.state.sessionApprovedTools.includes(tool.tool_name)) {
+        this.state.sessionApprovedTools.push(tool.tool_name);
+      }
+      const lastUserMsg = [...this.state.messages].reverse().find(m => m.role === 'user');
+      const originalRequest = lastUserMsg ? lastUserMsg.content : '';
+      this.state.sessionId = null;
+      this.state.claudeSessionId = null;
+      this._silent = true;
+      this._inputEl.value = `${originalRequest}\n\n[El usuario aprobo usar ${tool.tool_name}. ${details}]`;
+    } else {
+      this._inputEl.value = `APROBADO. ${details}`;
+    }
     this.sendMessage();
   },
 
@@ -1357,6 +1454,125 @@ const Claude = {
       localStorage.removeItem('potato-claude-commandsdir');
     }
     this._loadCommands();
+  },
+
+  // -- MCP Servers ------------------------------------------------------------
+
+  async _scanMcpServers() {
+    const btn = document.getElementById('setting-mcp-scan-btn');
+    if (this.state.mcpScanning) return;
+    this.state.mcpScanning = true;
+    btn.disabled = true;
+    btn.textContent = 'Escaneando...';
+
+    try {
+      const result = await this.invoke('scan_mcp_servers');
+      this.state.mcpServers = result.servers || [];
+      localStorage.setItem('potato-mcp-scan-results', JSON.stringify(this.state.mcpServers));
+
+      // Limpiar selecciones de servers que ya no existen
+      const validNames = new Set(this.state.mcpServers.map(s => s.name));
+      this.state.mcpSelected = this.state.mcpSelected.filter(n => validNames.has(n));
+      localStorage.setItem('potato-mcp-selected', JSON.stringify(this.state.mcpSelected));
+
+      this._renderMcpList();
+      const count = this.state.mcpServers.length;
+      btn.textContent = count > 0 ? `Escanear (${count})` : 'Escanear';
+    } catch (err) {
+      console.warn('[MCP] Scan error:', err);
+      btn.textContent = 'Escanear';
+    } finally {
+      this.state.mcpScanning = false;
+      btn.disabled = false;
+    }
+  },
+
+  _renderMcpList() {
+    const container = document.getElementById('setting-mcp-list');
+    if (!container) return;
+
+    if (this.state.mcpServers.length === 0) {
+      container.innerHTML = '<div class="settings-mcp-empty">No se encontraron servidores MCP.</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    const home = null; // Will replace from paths
+
+    // Agrupar por source_dir
+    const groups = {};
+    for (const server of this.state.mcpServers) {
+      if (!groups[server.source_dir]) groups[server.source_dir] = [];
+      groups[server.source_dir].push(server);
+    }
+
+    for (const [dir, servers] of Object.entries(groups)) {
+      // Header con ruta (reemplazar $HOME con ~/)
+      const header = document.createElement('div');
+      header.className = 'settings-mcp-group-header';
+      const homePath = dir.replace(/^\/home\/[^/]+/, '~');
+      header.textContent = homePath;
+      container.appendChild(header);
+
+      for (const server of servers) {
+        const row = document.createElement('div');
+        row.className = 'settings-mcp-server';
+
+        const info = document.createElement('div');
+        info.className = 'settings-mcp-server-info';
+
+        const name = document.createElement('div');
+        name.className = 'settings-mcp-server-name';
+        name.textContent = server.name;
+        info.appendChild(name);
+
+        const meta = document.createElement('div');
+        meta.className = 'settings-mcp-server-meta';
+        const detail = server.command || server.url || server.server_type;
+        meta.textContent = `${server.server_type} — ${detail}`;
+        info.appendChild(meta);
+
+        row.appendChild(info);
+
+        // Toggle switch
+        const label = document.createElement('label');
+        label.className = 'switch';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = this.state.mcpSelected.includes(server.name);
+        cb.addEventListener('change', () => {
+          if (cb.checked) {
+            if (!this.state.mcpSelected.includes(server.name)) {
+              this.state.mcpSelected.push(server.name);
+            }
+          } else {
+            this.state.mcpSelected = this.state.mcpSelected.filter(n => n !== server.name);
+          }
+          localStorage.setItem('potato-mcp-selected', JSON.stringify(this.state.mcpSelected));
+        });
+        const slider = document.createElement('span');
+        slider.className = 'switch-slider';
+        label.appendChild(cb);
+        label.appendChild(slider);
+        row.appendChild(label);
+
+        container.appendChild(row);
+      }
+    }
+  },
+
+  _getMcpConfigJson() {
+    if (this.state.mcpSelected.length === 0) return null;
+
+    const selected = this.state.mcpServers.filter(s => this.state.mcpSelected.includes(s.name));
+    if (selected.length === 0) return null;
+
+    const mcpServers = {};
+    for (const s of selected) {
+      mcpServers[s.name] = s.config;
+    }
+
+    return JSON.stringify({ mcpServers });
   },
 
   _autocompleteCheck() {
@@ -1760,11 +1976,18 @@ const Claude = {
       WebSearch: '&#127760;',
       Task: '&#9881;',
     };
+    if (name.startsWith('mcp__')) return '&#129302;';
     return icons[name] || '&#128295;';
   },
 
   _toolLabel(name, input) {
     if (!input) return '';
+    if (name.startsWith('mcp__')) {
+      const parts = name.split('__');
+      const server = parts[1] || '';
+      const action = parts.slice(2).join('__') || '';
+      return server + ' → ' + action;
+    }
     switch (name) {
       case 'Bash': return input.command ? '$ ' + input.command.slice(0, 50) : '';
       case 'Edit': return input.file_path || '';

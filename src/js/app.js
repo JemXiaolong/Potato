@@ -120,6 +120,9 @@ const App = {
       this._showWelcome();
     }
 
+    // Tour de novedades post-actualización
+    this._checkWhatsNew();
+
     // Check for updates (non-blocking, every 5 min)
     this._checkForUpdates();
     setInterval(() => this._checkForUpdates(), 5 * 60 * 1000);
@@ -1267,6 +1270,13 @@ const App = {
     const agentsOnlyToggle = document.getElementById('setting-claude-agents-only');
     if (agentsOnlyToggle) agentsOnlyToggle.checked = Claude.state.agentsOnly;
 
+    // MCP servers: renderizar lista guardada y actualizar botón
+    Claude._renderMcpList();
+    const mcpBtn = document.getElementById('setting-mcp-scan-btn');
+    if (mcpBtn && Claude.state.mcpServers.length > 0) {
+      mcpBtn.textContent = `Escanear (${Claude.state.mcpServers.length})`;
+    }
+
     modal.classList.add('open');
 
     const close = () => modal.classList.remove('open');
@@ -1688,7 +1698,82 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.18.3',
+  // -- What's New tour -------------------------------------------------------
+
+  _whatsNewStep: 0,
+  _whatsNewTotal: 0,
+
+  _checkWhatsNew() {
+    const seen = localStorage.getItem('potato-whatsnew-version');
+    if (seen === this._appVersion) return;
+    // No mostrar en primera instalación (sin historial previo)
+    if (!seen && !localStorage.getItem('potato-claude-history')) return;
+    this._showWhatsNew();
+  },
+
+  _showWhatsNew() {
+    const modal = document.getElementById('whatsnew-modal');
+    const steps = modal.querySelectorAll('.whatsnew-step');
+    this._whatsNewTotal = steps.length;
+    this._whatsNewStep = 0;
+
+    // Generar dots
+    const dotsContainer = document.getElementById('whatsnew-dots');
+    dotsContainer.innerHTML = '';
+    for (let i = 0; i < this._whatsNewTotal; i++) {
+      const dot = document.createElement('div');
+      dot.className = 'whatsnew-dot';
+      dotsContainer.appendChild(dot);
+    }
+
+    // Navegación
+    document.getElementById('whatsnew-btn-prev').onclick = () => {
+      if (this._whatsNewStep > 0) this._whatsNewGoTo(this._whatsNewStep - 1);
+    };
+    document.getElementById('whatsnew-btn-next').onclick = () => {
+      if (this._whatsNewStep < this._whatsNewTotal - 1) {
+        this._whatsNewGoTo(this._whatsNewStep + 1);
+      } else {
+        this._closeWhatsNew();
+      }
+    };
+    document.getElementById('whatsnew-modal-close').onclick = () => this._closeWhatsNew();
+
+    modal.classList.add('open');
+    this._whatsNewGoTo(0);
+  },
+
+  _whatsNewGoTo(step) {
+    this._whatsNewStep = step;
+    const modal = document.getElementById('whatsnew-modal');
+
+    // Ocultar todos, mostrar el actual
+    modal.querySelectorAll('.whatsnew-step').forEach((el, i) => {
+      el.classList.toggle('hidden', i !== step);
+    });
+
+    // Actualizar dots
+    document.querySelectorAll('#whatsnew-dots .whatsnew-dot').forEach((dot, i) => {
+      dot.classList.toggle('active', i === step);
+    });
+
+    // Botón prev
+    const prevBtn = document.getElementById('whatsnew-btn-prev');
+    prevBtn.style.visibility = step === 0 ? 'hidden' : 'visible';
+
+    // Botón next
+    const nextBtn = document.getElementById('whatsnew-btn-next');
+    nextBtn.textContent = step < this._whatsNewTotal - 1 ? 'Siguiente' : 'Entendido';
+  },
+
+  _closeWhatsNew() {
+    localStorage.setItem('potato-whatsnew-version', this._appVersion);
+    document.getElementById('whatsnew-modal').classList.remove('open');
+  },
+
+  // -- Updates ---------------------------------------------------------------
+
+  _appVersion: '0.18.4',
   _updateUrl: null,
 
   async _checkForUpdates() {

@@ -357,6 +357,31 @@
             </div>
           </div>
         </div>
+        <div class="settings-section-title">
+          <svg class="settings-section-icon" width="14" height="14" viewBox="0 0 16 16"
+               fill="none" stroke="currentColor" stroke-width="1.5"
+               stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="5" width="10" height="8" rx="1.5"/>
+            <circle cx="6" cy="9" r="1"/>
+            <circle cx="10" cy="9" r="1"/>
+            <path d="M6 5V3.5a2 2 0 0 1 4 0V5"/>
+            <line x1="8" y1="13" x2="8" y2="15"/>
+            <line x1="5" y1="15" x2="11" y2="15"/>
+          </svg>
+          MCP Servers
+        </div>
+        <div class="settings-section">
+          <div class="settings-row">
+            <div class="settings-row-info" style="flex:1;">
+              <span class="settings-row-label">Servidores MCP disponibles</span>
+              <span class="settings-row-desc">Detectar archivos .mcp.json para conectar Claude con servicios externos</span>
+            </div>
+            <button class="settings-action-btn" id="setting-mcp-scan-btn">Escanear</button>
+          </div>
+          <div class="settings-mcp-list" id="setting-mcp-list">
+            <div class="settings-mcp-empty">Haz clic en Escanear para buscar servidores MCP.</div>
+          </div>
+        </div>
         <div class="settings-soon">
           <div class="settings-soon-icon">&#9675;</div>
           <div class="settings-soon-title">Proximamente</div>
@@ -392,6 +417,75 @@
       <div class="modal-footer">
         <button class="modal-btn secondary" id="move-btn-cancel">Cancelar</button>
         <button class="modal-btn primary" id="move-btn-action">Mover</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- What's New Modal -->
+  <div class="modal-overlay" id="whatsnew-modal">
+    <div class="modal whatsnew">
+      <div class="modal-header">
+        <span class="modal-title">Novedades en POTATO</span>
+        <button class="modal-close" id="whatsnew-modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <!-- Step 0: Bienvenida -->
+        <div class="whatsnew-step" id="whatsnew-step-0">
+          <div class="whatsnew-icon">&#127881;</div>
+          <div class="whatsnew-title">&#161;Nueva versi&#243;n!</div>
+          <div class="whatsnew-desc">POTATO se ha actualizado con nuevas funciones. Descubre las novedades en un momento.</div>
+        </div>
+        <!-- Step 1: MCP Servers -->
+        <div class="whatsnew-step hidden" id="whatsnew-step-1">
+          <div class="whatsnew-icon">
+            <svg width="40" height="40" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="5" width="10" height="8" rx="1.5"/>
+              <circle cx="6" cy="9" r="1"/>
+              <circle cx="10" cy="9" r="1"/>
+              <path d="M6 5V3.5a2 2 0 0 1 4 0V5"/>
+              <line x1="8" y1="13" x2="8" y2="15"/>
+              <line x1="5" y1="15" x2="11" y2="15"/>
+            </svg>
+          </div>
+          <div class="whatsnew-title">MCP Servers</div>
+          <div class="whatsnew-desc">Ahora puedes conectar Claude con servicios externos usando archivos <code>.mcp.json</code>. Esto permite que Claude acceda a herramientas y datos adicionales.</div>
+        </div>
+        <!-- Step 2: Como usar -->
+        <div class="whatsnew-step hidden" id="whatsnew-step-2">
+          <div class="whatsnew-icon">&#9889;</div>
+          <div class="whatsnew-title">&#191;C&#243;mo funciona?</div>
+          <div class="whatsnew-steps-list">
+            <div class="whatsnew-steps-item">
+              <span class="whatsnew-step-num">1</span>
+              <span>Abre <strong>Ajustes</strong> desde el menu</span>
+            </div>
+            <div class="whatsnew-steps-item">
+              <span class="whatsnew-step-num">2</span>
+              <span>Busca la secci&#243;n <strong>MCP Servers</strong></span>
+            </div>
+            <div class="whatsnew-steps-item">
+              <span class="whatsnew-step-num">3</span>
+              <span>Haz clic en <strong>Escanear</strong> para detectar servidores</span>
+            </div>
+            <div class="whatsnew-steps-item">
+              <span class="whatsnew-step-num">4</span>
+              <span>Activa los toggles de los servidores que quieras usar</span>
+            </div>
+          </div>
+        </div>
+        <!-- Step 3: Listo -->
+        <div class="whatsnew-step hidden" id="whatsnew-step-3">
+          <div class="whatsnew-icon">&#128640;</div>
+          <div class="whatsnew-title">&#161;Listo!</div>
+          <div class="whatsnew-desc">Los servidores MCP se conectan autom&#225;ticamente cuando chateas con Claude. Solo activa los que necesites y empieza a usarlos.</div>
+        </div>
+      </div>
+      <div class="modal-footer whatsnew-footer">
+        <div class="whatsnew-dots" id="whatsnew-dots"></div>
+        <div class="whatsnew-nav">
+          <button class="modal-btn secondary" id="whatsnew-btn-prev">Anterior</button>
+          <button class="modal-btn primary" id="whatsnew-btn-next">Siguiente</button>
+        </div>
       </div>
     </div>
   </div>
