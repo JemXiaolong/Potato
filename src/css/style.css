@@ -1049,6 +1049,26 @@ mark {
 .settings-path-input::placeholder {
   color: var(--text-muted);
 }
+.settings-textarea {
+  width: 100%;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 0.786rem;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  outline: none;
+  resize: vertical;
+  margin-top: 6px;
+  line-height: 1.5;
+}
+.settings-textarea:focus {
+  border-color: var(--accent);
+}
+.settings-textarea::placeholder {
+  color: var(--text-muted);
+}
 
 /* Settings section title with icon */
 .settings-section-title {

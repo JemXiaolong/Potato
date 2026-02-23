@@ -1199,6 +1199,7 @@ async fn send_claude_message(
         let mut active_tool_id: Option<String> = None;
         let mut active_tool_index: Option<u64> = None;
         let mut tool_input_buf = String::new();
+        let mut tool_id_to_name: HashMap<String, String> = HashMap::new();
 
         if let Some(stdout) = child.stdout.take() {
             let reader = BufReader::new(stdout);
@@ -1284,10 +1285,11 @@ async fn send_claude_message(
                                             .and_then(|e| e.get("index"))
                                             .and_then(|i| i.as_u64());
 
-                                        active_tool_name = Some(name);
-                                        active_tool_id = Some(id);
+                                        active_tool_name = Some(name.clone());
+                                        active_tool_id = Some(id.clone());
                                         active_tool_index = index;
                                         tool_input_buf.clear();
+                                        tool_id_to_name.insert(id, name);
                                     }
                                 }
                             }
@@ -1396,12 +1398,16 @@ async fn send_claude_message(
                                         .and_then(|e| e.as_bool())
                                         .unwrap_or(false);
 
-                                    let tool_name = json
-                                        .get("tool_use_result")
-                                        .and_then(|r| r.get("tool_name"))
-                                        .and_then(|n| n.as_str())
-                                        .unwrap_or("Tool")
-                                        .to_string();
+                                    let tool_name = tool_id_to_name
+                                        .get(&tool_id)
+                                        .cloned()
+                                        .unwrap_or_else(|| {
+                                            json.get("tool_use_result")
+                                                .and_then(|r| r.get("tool_name"))
+                                                .and_then(|n| n.as_str())
+                                                .unwrap_or("Tool")
+                                                .to_string()
+                                        });
 
                                     let _ = on_event.send(StreamChunk {
                                         content: String::new(),

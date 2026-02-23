@@ -145,6 +145,17 @@ const Claude = {
 
     document.getElementById('setting-mcp-scan-btn').addEventListener('click', () => this._scanMcpServers());
 
+    // User context - load saved
+    this._userContext = localStorage.getItem('potato-claude-context') || '';
+    const ctxEl = document.getElementById('setting-claude-context');
+    if (ctxEl) {
+      ctxEl.value = this._userContext;
+      ctxEl.addEventListener('input', () => {
+        this._userContext = ctxEl.value;
+        localStorage.setItem('potato-claude-context', ctxEl.value);
+      });
+    }
+
     // Commands directory - load saved + listeners
     this.state.commandsDir = localStorage.getItem('potato-claude-commandsdir') || null;
 
@@ -388,6 +399,12 @@ const Claude = {
     parts.push('');
     parts.push('Responde en español. Se conciso.');
 
+    if (this._userContext) {
+      parts.push('');
+      parts.push('IDENTIDAD DEL USUARIO (usa SOLO esta info, ignora nombres del sistema operativo o rutas de archivos):');
+      parts.push(this._userContext);
+    }
+
     return parts.join('\n');
   },
 
@@ -444,6 +461,12 @@ const Claude = {
     }
     parts.push('2. SIEMPRE que menciones un archivo, incluye su RUTA ABSOLUTA COMPLETA.');
     parts.push('3. Responde en español. Se conciso y util.');
+
+    if (this._userContext) {
+      parts.push('');
+      parts.push('IDENTIDAD DEL USUARIO (usa SOLO esta info, ignora nombres del sistema operativo o rutas de archivos):');
+      parts.push(this._userContext);
+    }
 
     return parts.join('\n');
   },
@@ -692,6 +715,11 @@ const Claude = {
         }
 
         if (chunk.tool.phase === 'start') {
+          // Rastrear file_path de Write para abrir la nota al completar
+          if (chunk.tool.tool_name === 'Write' && chunk.tool.input?.file_path) {
+            this._pendingWritePaths = this._pendingWritePaths || {};
+            this._pendingWritePaths[chunk.tool.tool_id] = chunk.tool.input.file_path;
+          }
           if (chunk.tool.tool_name === 'Task') {
             this._showAgentStart(chunk.tool);
           } else {
@@ -706,6 +734,17 @@ const Claude = {
             this._resetAgentTimer(chunk.tool);
           } else {
             this._showToolResult(chunk.tool);
+          }
+          // Refrescar vault y abrir nota cuando Write/Edit modifica archivos dentro del vault
+          const writePath = this._pendingWritePaths?.[chunk.tool.tool_id];
+          if (writePath || (['Write', 'Edit'].includes(chunk.tool.tool_name) && !chunk.tool.is_error)) {
+            App.refreshVault().then(() => {
+              if (writePath && writePath.endsWith('.md') && App.state.vaultPath && writePath.startsWith(App.state.vaultPath)) {
+                const title = writePath.split('/').pop().replace(/\.md$/, '');
+                App.openNote(writePath, title);
+              }
+            });
+            if (writePath) delete this._pendingWritePaths[chunk.tool.tool_id];
           }
         }
         return;
@@ -1348,12 +1387,13 @@ const Claude = {
         }
     }
 
+    // Agregar herramienta a sessionApprovedTools para que no pida permiso otra vez
+    if (!this.state.sessionApprovedTools.includes(tool.tool_name)) {
+      this.state.sessionApprovedTools.push(tool.tool_name);
+    }
+
     if (isMcpTool) {
       // MCP tools: sesion fresca (--resume rompe las conexiones MCP)
-      // Agregar a sessionApprovedTools para que la nueva sesion no pida permiso otra vez
-      if (!this.state.sessionApprovedTools.includes(tool.tool_name)) {
-        this.state.sessionApprovedTools.push(tool.tool_name);
-      }
       const lastUserMsg = [...this.state.messages].reverse().find(m => m.role === 'user');
       const originalRequest = lastUserMsg ? lastUserMsg.content : '';
       this.state.sessionId = null;
