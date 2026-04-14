@@ -196,6 +196,9 @@ const App = {
     const entries = await this.invoke('list_vault', { path });
     Sidebar.render(entries);
 
+    // Cargar archivos recientes
+    this._loadRecentFiles(path);
+
     // Notificar a Claude del nuevo vault
     Claude.onVaultChanged();
     Claude.updateContext();
@@ -204,11 +207,148 @@ const App = {
     this._saveSession();
   },
 
+  _recentFiles: [],
+
+  async _loadRecentFiles(path) {
+    try {
+      const files = await this.invoke('git_recent_files', { path, limit: 50 });
+      this._recentFiles = files || [];
+      this._buildRecentFilter();
+      this._renderRecentFiles();
+    } catch (e) {
+      console.warn('No se pudieron cargar archivos recientes:', e);
+    }
+  },
+
+  _cleanRecentName(name) {
+    let clean = name.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+    clean = clean.replace(/^t\d{4,6}-/, '');
+    clean = clean.replace(/[_-]/g, ' ');
+    return clean.charAt(0).toUpperCase() + clean.slice(1);
+  },
+
+  _formatRecentDate(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    const now = new Date();
+    const diff = Math.floor((now - d) / 86400000);
+    if (diff === 0) return 'hoy';
+    if (diff === 1) return 'ayer';
+    if (diff < 7) return 'hace ' + diff + 'd';
+    return dateStr.slice(5); // MM-DD
+  },
+
+  _getAuthorInitials(author) {
+    return author.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  },
+
+  _getAuthorColor(author) {
+    let hash = 0;
+    for (let i = 0; i < author.length; i++) hash = author.charCodeAt(i) + ((hash << 5) - hash);
+    const colors = ['#c792ea', '#7fdbca', '#f78c6c', '#82aaff', '#c3e88d', '#ffcb6b', '#89ddff', '#f07178'];
+    return colors[Math.abs(hash) % colors.length];
+  },
+
+  _recentAuthorFilter: '',
+
+  _buildRecentFilter() {
+    // Filter is now built into the avatar clicks
+    this._recentAuthorFilter = '';
+    this._updateFilterLabel();
+  },
+
+  _updateFilterLabel() {
+    const label = document.getElementById('recent-filter-label');
+    if (!label) return;
+    if (this._recentAuthorFilter) {
+      label.textContent = this._recentAuthorFilter + ' \u00D7';
+      label.style.setProperty('--filter-color', this._getAuthorColor(this._recentAuthorFilter));
+      label.classList.remove('hidden');
+      label.onclick = () => {
+        this._recentAuthorFilter = '';
+        this._updateFilterLabel();
+        this._renderRecentFiles();
+      };
+    } else {
+      label.classList.add('hidden');
+      label.onclick = null;
+    }
+  },
+
+  _filterByAuthor(author) {
+    if (this._recentAuthorFilter === author) {
+      this._recentAuthorFilter = '';
+    } else {
+      this._recentAuthorFilter = author;
+    }
+    this._updateFilterLabel();
+    this._renderRecentFiles();
+  },
+
+  _renderRecentFiles() {
+    const list = document.getElementById('recent-files-list');
+    const section = document.getElementById('recent-files');
+    if (!list || !section) return;
+
+    if (this._recentFiles.length === 0) {
+      section.classList.add('hidden');
+      return;
+    }
+
+    section.classList.remove('hidden');
+    list.innerHTML = '';
+
+    const selectedAuthor = this._recentAuthorFilter;
+    const filtered = selectedAuthor
+      ? this._recentFiles.filter(f => f.author === selectedAuthor)
+      : this._recentFiles;
+
+    for (const file of filtered) {
+      const item = document.createElement('div');
+      item.className = 'recent-item';
+      item.dataset.path = file.path;
+      item.title = file.name;
+
+      const avatar = document.createElement('span');
+      avatar.className = 'recent-avatar';
+      avatar.textContent = this._getAuthorInitials(file.author);
+      avatar.style.setProperty('--avatar-color', this._getAuthorColor(file.author));
+
+      const info = document.createElement('div');
+      info.className = 'recent-info';
+
+      const name = document.createElement('span');
+      name.className = 'recent-name';
+      name.textContent = this._cleanRecentName(file.name);
+
+      const meta = document.createElement('span');
+      meta.className = 'recent-meta';
+      meta.textContent = file.author + ' \u00B7 ' + this._formatRecentDate(file.date);
+
+      info.appendChild(name);
+      info.appendChild(meta);
+
+      item.appendChild(avatar);
+      item.appendChild(info);
+
+      avatar.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._filterByAuthor(file.author);
+      });
+
+      item.addEventListener('click', () => {
+        this.openNote(file.path, file.name);
+      });
+
+      list.appendChild(item);
+    }
+  },
+
   async refreshVault() {
     if (!this.state.vaultPath) return;
     await this._updateChangedFiles();
     const entries = await this.invoke('list_vault', { path: this.state.vaultPath });
     Sidebar.render(entries);
+    this._loadRecentFiles(this.state.vaultPath);
   },
 
   // -- Notes ---------------------------------------------------------------
@@ -1773,7 +1913,7 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.18.5',
+  _appVersion: '0.19.0',
   _updateUrl: null,
 
   async _checkForUpdates() {

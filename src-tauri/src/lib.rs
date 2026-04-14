@@ -1069,15 +1069,8 @@ fn get_claude_binary() -> Result<String, String> {
         return Ok(path.clone());
     }
 
-    // Intentar "claude" directo primero (por si está en el PATH del proceso)
-    if let Ok(output) = std::process::Command::new("claude").arg("--version").output() {
-        if output.status.success() {
-            *guard = Some("claude".to_string());
-            return Ok("claude".to_string());
-        }
-    }
-
-    // Resolver ruta completa
+    // Resolver ruta completa (siempre usar ruta absoluta para evitar problemas de PATH)
+    // Primero intentar resolve_claude_binary que busca la ruta real
     match resolve_claude_binary() {
         Some(path) => {
             *guard = Some(path.clone());
@@ -1170,12 +1163,22 @@ async fn send_claude_message(
             .stderr(Stdio::piped());
 
         if let Some(ref dir) = working_dir {
-            cmd.current_dir(dir);
+            if std::path::Path::new(dir).is_dir() {
+                cmd.current_dir(dir);
+            }
         }
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("No se pudo ejecutar claude: {}", e))?;
+            .map_err(|e| {
+                let bin_exists = std::path::Path::new(&binary).exists();
+                let dir_info = working_dir.as_deref().unwrap_or("(none)");
+                let dir_exists = working_dir.as_ref().map_or(true, |d| std::path::Path::new(d).is_dir());
+                format!(
+                    "No se pudo ejecutar claude: {} | binary={} (exists={}) | workdir={} (exists={})",
+                    e, binary, bin_exists, dir_info, dir_exists
+                )
+            })?;
 
         claude_register(&process_id, child.id());
 
@@ -1618,6 +1621,85 @@ async fn restart_app(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// -- Comandos: Recent Files --------------------------------------------------
+
+#[derive(Serialize, Clone)]
+pub struct RecentFile {
+    path: String,
+    name: String,
+    author: String,
+    date: String,
+}
+
+#[tauri::command]
+async fn git_recent_files(path: String, limit: Option<usize>) -> Result<Vec<RecentFile>, String> {
+    tokio::task::spawn_blocking(move || {
+        let max = limit.unwrap_or(20);
+
+        let output = git_cmd(&path)
+            .args([
+                "log", "--all", "--diff-filter=A", "--name-only",
+                "--pretty=format:COMMIT_SEP|%an|%as",
+                "--", "*.md",
+            ])
+            .output()
+            .map_err(|e| format!("Error git log: {}", e))?;
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut results: Vec<RecentFile> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut current_author = String::new();
+        let mut current_date = String::new();
+
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.starts_with("COMMIT_SEP|") {
+                let parts: Vec<&str> = trimmed.splitn(3, '|').collect();
+                if parts.len() >= 3 {
+                    current_author = parts[1].to_string();
+                    current_date = parts[2].to_string();
+                }
+            } else if trimmed.ends_with(".md") {
+                if seen.contains(trimmed) {
+                    continue;
+                }
+                seen.insert(trimmed.to_string());
+
+                let full_path = format!("{}/{}", path, trimmed);
+                // Only include files that still exist
+                if !std::path::Path::new(&full_path).exists() {
+                    continue;
+                }
+
+                let name = trimmed.rsplit('/').next().unwrap_or(trimmed)
+                    .trim_end_matches(".md").to_string();
+
+                results.push(RecentFile {
+                    path: full_path,
+                    name,
+                    author: current_author.clone(),
+                    date: current_date.clone(),
+                });
+
+                if results.len() >= max {
+                    break;
+                }
+            }
+        }
+
+        Ok(results)
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
 // -- App ---------------------------------------------------------------------
 
 pub fn run() {
@@ -1636,6 +1718,7 @@ pub fn run() {
             git_stage_files,
             git_commit,
             git_push,
+            git_recent_files,
             pick_folder,
             move_file,
             open_in_explorer,

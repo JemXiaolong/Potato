@@ -913,8 +913,21 @@ const Claude = {
           block.dataset.highlighted = '1';
         }
       });
+      // Renderizar Mermaid durante streaming
+      this._renderMermaidIn(body);
     }
     this._scrollToBottom();
+  },
+
+  async _renderMermaidIn(container) {
+    if (typeof mermaid === 'undefined') return;
+    const nodes = container.querySelectorAll('.mermaid:not([data-processed])');
+    if (nodes.length === 0) return;
+    try {
+      await mermaid.run({ nodes });
+    } catch (e) {
+      // Ignorar errores durante streaming (diagrama incompleto)
+    }
   },
 
   _finalizeStream() {
@@ -936,6 +949,7 @@ const Claude = {
         hljs.highlightElement(block);
       });
       this._linkifyVaultPaths(body);
+      this._renderMermaidIn(body);
     } else {
       body.innerHTML = '';
     }

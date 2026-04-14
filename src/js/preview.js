@@ -5,9 +5,44 @@ const Preview = {
   _el: null,
   _onWikilinkClick: null,
 
+  _mermaidReady: false,
+  _mermaidIdCounter: 0,
+
   init(elementId, onWikilinkClick) {
     this._el = document.getElementById(elementId);
     this._onWikilinkClick = onWikilinkClick;
+
+    // Inicializar Mermaid con tema dark
+    if (typeof mermaid !== 'undefined') {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        themeVariables: {
+          darkMode: true,
+          background: '#0d1117',
+          primaryColor: '#1a3a5c',
+          primaryTextColor: '#d6deeb',
+          primaryBorderColor: '#1d3b53',
+          secondaryColor: '#1e3a5f',
+          secondaryTextColor: '#c8d6e5',
+          tertiaryColor: '#152d4a',
+          lineColor: '#5f7e97',
+          textColor: '#d6deeb',
+          mainBkg: '#1a3a5c',
+          nodeBorder: '#5f7e97',
+          clusterBkg: '#0d1b2a',
+          clusterBorder: '#1d3b53',
+          titleColor: '#c792ea',
+          edgeLabelBackground: '#0d1117',
+          nodeTextColor: '#d6deeb',
+        },
+        fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+        fontSize: 14,
+        flowchart: { curve: 'basis', padding: 20 },
+        sequence: { mirrorActors: false, bottomMarginAdj: 1 },
+      });
+      this._mermaidReady = true;
+    }
 
     // Configurar marked con highlight.js
     if (typeof marked !== 'undefined') {
@@ -16,9 +51,18 @@ const Preview = {
         gfm: true,
       });
 
-      // Custom renderer for code blocks with highlight.js
+      const self = this;
+
+      // Custom renderer for code blocks with highlight.js + Mermaid
       const renderer = new marked.Renderer();
       renderer.code = function ({ text, lang }) {
+        // Mermaid: renderizar como contenedor de diagrama
+        if (lang === 'mermaid' && self._mermaidReady) {
+          const id = 'mermaid-' + (self._mermaidIdCounter++);
+          return '<div class="mermaid-container">'
+               + '<div class="mermaid" id="' + id + '">' + text + '</div>'
+               + '</div>';
+        }
         if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
           const highlighted = hljs.highlight(text, { language: lang }).value;
           return '<pre><code class="hljs language-' + lang + '">' + highlighted + '</code></pre>';
@@ -279,6 +323,20 @@ const Preview = {
         .replace(/[^\w\s-]/g, '').replace(/\s+/g, '-');
       heading.id = slug + '-' + i;
     });
+
+    // Renderizar diagramas Mermaid
+    this._renderMermaid();
+  },
+
+  async _renderMermaid() {
+    if (!this._mermaidReady) return;
+    const nodes = this._el.querySelectorAll('.mermaid:not([data-processed])');
+    if (nodes.length === 0) return;
+    try {
+      await mermaid.run({ nodes });
+    } catch (e) {
+      console.warn('Mermaid render error:', e);
+    }
   },
 
   getHeadings() {
