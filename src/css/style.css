@@ -652,6 +652,94 @@ mark {
   display: none;
 }
 
+/* Toasts */
+.toast-container {
+  position: fixed;
+  top: calc(var(--toolbar-h) + 14px);
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  z-index: 400;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 460px;
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.929rem;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transform: translateX(16px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.toast-icon {
+  flex-shrink: 0;
+  display: flex;
+  color: var(--accent);
+}
+
+.toast.warn {
+  border-left-color: #f0a45d;
+}
+
+.toast.warn .toast-icon {
+  color: #f0a45d;
+}
+
+.toast.error {
+  border-left-color: #eb6f92;
+}
+
+.toast.error .toast-icon {
+  color: #eb6f92;
+}
+
+/* Share note button */
+.share-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 1.071rem;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+
+.share-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.share-btn.copied {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.share-btn.hidden {
+  display: none;
+}
+
 /* Close note button */
 .close-note-btn {
   background: transparent;

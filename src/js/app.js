@@ -74,6 +74,9 @@ const App = {
     // Split view button
     document.getElementById('split-btn').addEventListener('click', () => this.toggleSplit());
 
+    // Share button
+    document.getElementById('share-btn').addEventListener('click', () => this.shareNote());
+
     // Font size controls
     document.getElementById('font-size-down').addEventListener('click', () => this._changeFontSize(-1));
     document.getElementById('font-size-up').addEventListener('click', () => this._changeFontSize(1));
@@ -381,6 +384,7 @@ const App = {
     document.getElementById('mode-toggle').classList.remove('hidden');
     document.getElementById('close-note-btn').classList.remove('hidden');
     document.getElementById('split-btn').classList.remove('hidden');
+    document.getElementById('share-btn').classList.remove('hidden');
     document.getElementById('note-nav').classList.remove('hidden');
 
     // Sync editor/preview visibility with current mode
@@ -408,6 +412,7 @@ const App = {
     document.getElementById('mode-toggle').classList.add('hidden');
     document.getElementById('close-note-btn').classList.add('hidden');
     document.getElementById('split-btn').classList.add('hidden');
+    document.getElementById('share-btn').classList.add('hidden');
     document.getElementById('note-nav').classList.add('hidden');
 
     // Reset split mode, TOC, and clean up
@@ -1611,6 +1616,160 @@ const App = {
     document.getElementById('font-size-label').textContent = this._fontSize;
   },
 
+  // -- Share -----------------------------------------------------------------
+
+  /**
+   * Copy a shareable link to the current note.
+   *
+   * The vault is a git repository, so the note already has a canonical web
+   * address on the hosting provider. When the vault has no usable remote we
+   * fall back to copying the vault-relative path plus its wikilink.
+   */
+  async shareNote() {
+    if (!this.state.currentNote) return;
+
+    // Flush pending edits so the link points at what the user sees.
+    await this.saveCurrentNote();
+
+    let link;
+    try {
+      link = await this.invoke('git_share_link', {
+        vaultPath: this.state.vaultPath,
+        notePath: this.state.currentNote.path,
+      });
+    } catch (err) {
+      console.warn('Could not build share link:', err);
+      this._setStatus('No se pudo generar el enlace');
+      return;
+    }
+
+    if (!link) return;
+
+    let payload;
+    let message;
+    let variant = 'success';
+
+    if (link.url) {
+      payload = link.url;
+      if (link.sync_state === 'uncommitted') {
+        message = 'Enlace copiado — la nota tiene cambios sin sincronizar (Ctrl+Shift+S)';
+        variant = 'warn';
+      } else if (link.sync_state === 'unpushed') {
+        message = 'Enlace copiado — hay commits sin subir (Ctrl+Shift+S)';
+        variant = 'warn';
+      } else if (link.sync_state === 'unknown') {
+        message = 'Enlace copiado — sin rama remota configurada, verifica que exista';
+        variant = 'warn';
+      } else {
+        message = 'Enlace guardado en el portapapeles';
+      }
+    } else {
+      // No remote (or an unsupported host): share what still identifies the
+      // note inside a shared vault.
+      const title = this.state.currentNote.title.replace(/\.md$/i, '');
+      payload = `${link.relative_path}\n[[${title}]]`;
+      message =
+        link.provider === 'unsupported'
+          ? 'Ruta copiada — el remoto no es GitHub/GitLab'
+          : 'Ruta copiada — el vault no tiene remoto configurado';
+      variant = 'warn';
+    }
+
+    const copied = await this._copyToClipboard(payload);
+    if (!copied) {
+      this._showToast('No se pudo copiar al portapapeles', 'error');
+      this._setStatus('No se pudo copiar al portapapeles');
+      return;
+    }
+
+    this._showToast(message, variant);
+    this._setStatus(message);
+
+    const btn = document.getElementById('share-btn');
+    btn.classList.add('copied');
+    clearTimeout(this._shareFeedbackTimeout);
+    this._shareFeedbackTimeout = setTimeout(() => {
+      btn.classList.remove('copied');
+      if (this.state.currentNote) this._setStatus(this.state.currentNote.title);
+    }, 2500);
+  },
+
+  // -- Toasts ----------------------------------------------------------------
+
+  _toastIcons: {
+    success:
+      '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l2 2 3.6-4"/></svg>',
+    warn:
+      '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8l6.2 11.4H1.8z"/><line x1="8" y1="6" x2="8" y2="9.4"/><line x1="8" y1="11.4" x2="8" y2="11.5"/></svg>',
+    error:
+      '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.5"/><line x1="6" y1="6" x2="10" y2="10"/><line x1="10" y1="6" x2="6" y2="10"/></svg>',
+  },
+
+  /**
+   * Show a transient toast above the status bar.
+   * Variants: 'success' (default), 'warn', 'error'.
+   */
+  _showToast(message, variant = 'success', duration = null) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const kind = this._toastIcons[variant] ? variant : 'success';
+    // Warnings carry an instruction, so they need longer on screen.
+    const ms = duration !== null ? duration : kind === 'success' ? 2600 : 4500;
+
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + kind;
+
+    const icon = document.createElement('span');
+    icon.className = 'toast-icon';
+    icon.innerHTML = this._toastIcons[kind];
+
+    // textContent: the message can carry note titles / paths.
+    const text = document.createElement('span');
+    text.className = 'toast-text';
+    text.textContent = message;
+
+    toast.appendChild(icon);
+    toast.appendChild(text);
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => toast.classList.add('visible'));
+
+    const remove = () => {
+      toast.classList.remove('visible');
+      setTimeout(() => toast.remove(), 200);
+    };
+    setTimeout(remove, ms);
+  },
+
+  async _copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (err) {
+      console.warn('Clipboard API failed, falling back:', err);
+    }
+
+    // WebKitGTK can reject the async Clipboard API outside a user gesture.
+    try {
+      const helper = document.createElement('textarea');
+      helper.value = text;
+      helper.setAttribute('readonly', '');
+      helper.style.position = 'fixed';
+      helper.style.opacity = '0';
+      document.body.appendChild(helper);
+      helper.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(helper);
+      return ok;
+    } catch (err) {
+      console.warn('Clipboard fallback failed:', err);
+      return false;
+    }
+  },
+
   // -- Changed files (unsynced indicators) -----------------------------------
 
   async _updateChangedFiles() {
@@ -1913,7 +2072,7 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.19.0',
+  _appVersion: '0.20.0',
   _updateUrl: null,
 
   async _checkForUpdates() {

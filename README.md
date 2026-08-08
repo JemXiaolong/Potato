@@ -119,6 +119,17 @@ Genera los instaladores en `src-tauri/target/release/bundle/`:
 - Sync interactivo paso a paso: Pull → Seleccion de archivos → Commit → Push
 - Mensaje de commit automatico basado en contenido (frontmatter/encabezados)
 - Clonar repositorios GitHub directamente desde la app
+- Boton **Compartir** en la barra superior: copia al portapapeles la URL web de
+  la nota (`https://github.com/<org>/<repo>/blob/<rama>/<ruta>.md`), construida
+  a partir del remoto `origin`, la rama actual y la ruta relativa. GitHub
+  renderiza el Markdown y los permisos del repositorio controlan quien puede
+  verlo, sin servidor adicional.
+  - Compatible con remotos SSH (`git@host:org/repo.git`), `ssh://` y HTTPS.
+  - Soporta GitHub y GitLab; con otros remotos copia la ruta relativa y el
+    wikilink de la nota.
+  - Muestra un aviso emergente (toast) confirmando la copia. El aviso cambia a
+    color ambar si la nota tiene cambios sin commitear o commits sin subir,
+    porque en ese caso el enlace todavia no resuelve.
 - Soporte SSH y HTTPS con mensajes de error claros
 - Barra de progreso en tiempo real
 

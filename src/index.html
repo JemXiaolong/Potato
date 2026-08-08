@@ -24,6 +24,7 @@
       <button class="font-size-btn" id="font-size-up" title="Aumentar fuente">&#43;</button>
     </div>
     <button class="claude-toggle-btn hidden" id="claude-toggle-btn" title="Claude (Ctrl+L)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1l1.5 3.5L13 6l-3.5 1.5L8 11 6.5 7.5 3 6l3.5-1.5z"/><path d="M12 10l.75 1.75L14.5 12.5l-1.75.75L12 15l-.75-1.75-1.75-.75 1.75-.75z"/></svg></button>
+    <button class="share-btn hidden" id="share-btn" title="Compartir enlace de la nota"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="3.5" r="2"/><circle cx="4" cy="8" r="2"/><circle cx="12" cy="12.5" r="2"/><line x1="5.8" y1="7.1" x2="10.2" y2="4.4"/><line x1="5.8" y1="8.9" x2="10.2" y2="11.6"/></svg></button>
     <button class="split-btn hidden" id="split-btn" title="Vista dividida"><svg width="16" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="14" height="12" rx="1.5"/><line x1="8" y1="1" x2="8" y2="13"/></svg></button>
     <button class="close-note-btn hidden" id="close-note-btn" title="Cerrar nota">&times;</button>
     <div class="mode-toggle hidden" id="mode-toggle">
@@ -227,6 +228,9 @@
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1l1.5 3.5L13 6l-3.5 1.5L8 11 6.5 7.5 3 6l3.5-1.5z"/><path d="M12 10l.75 1.75L14.5 12.5l-1.75.75L12 15l-.75-1.75-1.75-.75 1.75-.75z"/></svg>
     <span>Claude</span>
   </div>
+
+  <!-- Toasts -->
+  <div class="toast-container" id="toast-container"></div>
 
   <!-- Status bar -->
   <footer class="statusbar">
@@ -450,56 +454,55 @@
         <!-- Step 0: Bienvenida -->
         <div class="whatsnew-step" id="whatsnew-step-0">
           <div class="whatsnew-icon">&#127881;</div>
-          <div class="whatsnew-title">POTATO v0.19.0</div>
-          <div class="whatsnew-desc">Nuevas funciones para visualizar y colaborar mejor. Descubre las novedades en un momento.</div>
+          <div class="whatsnew-title">POTATO v0.20.0</div>
+          <div class="whatsnew-desc">Ahora puedes compartir cualquier nota con un enlace. Descubre las novedades en un momento.</div>
         </div>
-        <!-- Step 1: Mermaid -->
+        <!-- Step 1: Compartir nota -->
         <div class="whatsnew-step hidden" id="whatsnew-step-1">
           <div class="whatsnew-icon">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="2" y="3" width="7" height="5" rx="1"/>
-              <rect x="15" y="3" width="7" height="5" rx="1"/>
-              <rect x="8.5" y="16" width="7" height="5" rx="1"/>
-              <line x1="5.5" y1="8" x2="5.5" y2="12"/>
-              <line x1="18.5" y1="8" x2="18.5" y2="12"/>
-              <line x1="5.5" y1="12" x2="18.5" y2="12"/>
-              <line x1="12" y1="12" x2="12" y2="16"/>
+              <circle cx="18" cy="5" r="3"/>
+              <circle cx="6" cy="12" r="3"/>
+              <circle cx="18" cy="19" r="3"/>
+              <line x1="8.6" y1="10.5" x2="15.4" y2="6.5"/>
+              <line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/>
             </svg>
           </div>
-          <div class="whatsnew-title">Diagramas Mermaid</div>
-          <div class="whatsnew-desc">Los bloques <code>```mermaid</code> ahora se renderizan como diagramas interactivos con tema dark. Soporta flowcharts, secuencia, estado, arquitectura y m&#225;s.</div>
+          <div class="whatsnew-title">Compartir notas por enlace</div>
+          <div class="whatsnew-desc">El nuevo bot&#243;n <strong>Compartir</strong> de la barra superior copia la URL web de la nota. Se arma con el remoto del vault, la rama actual y la ruta del archivo, as&#237; que se abre y se lee en el navegador sin instalar nada.</div>
         </div>
-        <!-- Step 2: Recent Files -->
+        <!-- Step 2: Avisos emergentes -->
         <div class="whatsnew-step hidden" id="whatsnew-step-2">
           <div class="whatsnew-icon">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
+              <rect x="2" y="6" width="20" height="9" rx="2"/>
+              <path d="M7.5 10.5l2 2 4.5-4.5"/>
+              <line x1="6" y1="19" x2="18" y2="19"/>
             </svg>
           </div>
-          <div class="whatsnew-title">Archivos Recientes</div>
-          <div class="whatsnew-desc">El sidebar ahora muestra los &#250;ltimos 50 archivos agregados al vault con el autor y fecha de cada uno. Haz clic en el avatar para filtrar por autor.</div>
+          <div class="whatsnew-title">Avisos emergentes</div>
+          <div class="whatsnew-desc">Un aviso en la esquina superior derecha confirma que el enlace se copi&#243;. Cambia a color &#225;mbar cuando la nota tiene cambios sin commitear o commits sin subir, porque en ese caso el enlace todav&#237;a no resuelve.</div>
         </div>
-        <!-- Step 3: Fix Claude -->
+        <!-- Step 3: Detalles -->
         <div class="whatsnew-step hidden" id="whatsnew-step-3">
           <div class="whatsnew-icon">&#128295;</div>
-          <div class="whatsnew-title">Mejoras y correcciones</div>
+          <div class="whatsnew-title">Detalles</div>
           <div class="whatsnew-steps-list">
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">1</span>
-              <span>Diagramas Mermaid tambi&#233;n se renderizan en respuestas de <strong>Claude</strong></span>
+              <span>Compatible con remotos <strong>SSH</strong>, <code>ssh://</code> y <strong>HTTPS</strong></span>
             </div>
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">2</span>
-              <span>Los recientes se actualizan en <strong>tiempo real</strong> al sincronizar</span>
+              <span>Soporta <strong>GitHub</strong> y <strong>GitLab</strong>; con otros remotos copia la ruta y el wikilink</span>
             </div>
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">3</span>
-              <span>Fix: Claude ya no falla si el directorio de trabajo fue eliminado</span>
+              <span>Las credenciales del remoto nunca se incluyen en el enlace copiado</span>
             </div>
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">4</span>
-              <span>Resoluci&#243;n de binario Claude m&#225;s robusta con ruta absoluta</span>
+              <span>Si el vault est&#225; en <strong>HEAD desprendido</strong>, el enlace usa el commit exacto</span>
             </div>
           </div>
         </div>
@@ -507,7 +510,7 @@
         <div class="whatsnew-step hidden" id="whatsnew-step-4">
           <div class="whatsnew-icon">&#128640;</div>
           <div class="whatsnew-title">&#161;Listo!</div>
-          <div class="whatsnew-desc">Escribe <code>```mermaid</code> en cualquier nota para crear diagramas y revisa la secci&#243;n <strong>Recientes</strong> en el sidebar para ver la actividad de tu equipo.</div>
+          <div class="whatsnew-desc">Abre cualquier nota y pulsa el bot&#243;n <strong>Compartir</strong> de la barra superior. Sincroniza antes con <code>Ctrl+Shift+S</code> para que el enlace resuelva de inmediato.</div>
         </div>
       </div>
       <div class="modal-footer whatsnew-footer">

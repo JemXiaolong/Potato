@@ -345,6 +345,258 @@ async fn git_pull(path: String) -> Result<String, String> {
     .map_err(|e| format!("Task error: {}", e))?
 }
 
+#[derive(Serialize)]
+struct ShareLink {
+    /// Web URL that renders the note, empty when the host is unsupported.
+    url: String,
+    /// "github" | "gitlab" | "none" (no repo/remote) | "unsupported" (unknown host)
+    provider: String,
+    /// Note path relative to the vault root, always filled.
+    relative_path: String,
+    branch: String,
+    /// "synced" | "uncommitted" | "unpushed" | "unknown"
+    sync_state: String,
+}
+
+/// Convert a git remote URL into its web base URL.
+/// Handles `git@host:org/repo.git`, `ssh://git@host/org/repo.git` and
+/// `https://host/org/repo.git`. Returns (base_url, provider).
+fn remote_to_web_base(remote: &str) -> (String, String) {
+    let remote = remote.trim();
+    if remote.is_empty() {
+        return (String::new(), "none".to_string());
+    }
+
+    // Normalize to "host/org/repo"
+    let stripped = if let Some(rest) = remote.strip_prefix("git@") {
+        // git@github.com:org/repo.git
+        rest.replacen(':', "/", 1)
+    } else if let Some(rest) = remote.strip_prefix("ssh://") {
+        rest.trim_start_matches("git@").to_string()
+    } else if let Some(rest) = remote.strip_prefix("https://") {
+        rest.to_string()
+    } else if let Some(rest) = remote.strip_prefix("http://") {
+        rest.to_string()
+    } else {
+        return (String::new(), "unsupported".to_string());
+    };
+
+    // Drop credentials in https://user:token@host/... and the trailing .git
+    let stripped = match stripped.split_once('@') {
+        Some((_, rest)) => rest.to_string(),
+        None => stripped,
+    };
+    let stripped = stripped.trim_end_matches('/');
+    let stripped = stripped.strip_suffix(".git").unwrap_or(stripped);
+
+    let host = stripped.split('/').next().unwrap_or("");
+    // Strip an explicit port (host:22/org/repo)
+    let host_no_port = host.split(':').next().unwrap_or(host);
+
+    let provider = if host_no_port == "github.com" {
+        "github"
+    } else if host_no_port.contains("gitlab") {
+        "gitlab"
+    } else {
+        return (String::new(), "unsupported".to_string());
+    };
+
+    let path = stripped.strip_prefix(host).unwrap_or("").trim_start_matches('/');
+    if path.is_empty() {
+        return (String::new(), "unsupported".to_string());
+    }
+
+    (
+        format!("https://{}/{}", host_no_port, path),
+        provider.to_string(),
+    )
+}
+
+/// Percent-encode a path for use inside a URL, keeping `/` separators intact.
+fn encode_url_path(path: &str) -> String {
+    let unreserved = |c: u8| {
+        c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.' | b'~' | b'/')
+    };
+    let mut out = String::with_capacity(path.len());
+    for byte in path.as_bytes() {
+        if unreserved(*byte) {
+            out.push(*byte as char);
+        } else {
+            out.push_str(&format!("%{:02X}", byte));
+        }
+    }
+    out
+}
+
+/// Build a shareable web link for a note inside a git-backed vault.
+#[tauri::command]
+async fn git_share_link(vault_path: String, note_path: String) -> Result<ShareLink, String> {
+    tokio::task::spawn_blocking(move || {
+        // Note path relative to the vault root (this is the fallback payload
+        // when the vault has no usable remote).
+        let relative_path = note_path
+            .strip_prefix(&vault_path)
+            .unwrap_or(&note_path)
+            .trim_start_matches('/')
+            .to_string();
+
+        let empty = ShareLink {
+            url: String::new(),
+            provider: "none".to_string(),
+            relative_path: relative_path.clone(),
+            branch: String::new(),
+            sync_state: "unknown".to_string(),
+        };
+
+        if !std::path::Path::new(&vault_path).join(".git").exists() {
+            return Ok(empty);
+        }
+
+        let remote = git_cmd(&vault_path)
+            .args(["remote", "get-url", "origin"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+        let (base, provider) = remote_to_web_base(&remote);
+        if base.is_empty() {
+            return Ok(ShareLink { provider, ..empty });
+        }
+
+        let branch = git_cmd(&vault_path)
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+
+        // Detached HEAD: link the commit sha so the URL still resolves.
+        let git_ref = if branch.is_empty() || branch == "HEAD" {
+            git_cmd(&vault_path)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default()
+        } else {
+            branch.clone()
+        };
+
+        if git_ref.is_empty() {
+            return Ok(ShareLink { provider, ..empty });
+        }
+
+        // GitHub and GitLab differ in their blob path.
+        let url = if provider == "gitlab" {
+            format!(
+                "{}/-/blob/{}/{}",
+                base,
+                encode_url_path(&git_ref),
+                encode_url_path(&relative_path)
+            )
+        } else {
+            format!(
+                "{}/blob/{}/{}",
+                base,
+                encode_url_path(&git_ref),
+                encode_url_path(&relative_path)
+            )
+        };
+
+        // Sync state for THIS note: uncommitted work first, then unpushed commits.
+        let dirty = git_cmd(&vault_path)
+            .args(["status", "--porcelain", "--", &relative_path])
+            .output()
+            .map(|o| !o.stdout.is_empty())
+            .unwrap_or(false);
+
+        let sync_state = if dirty {
+            "uncommitted".to_string()
+        } else {
+            let unpushed = git_cmd(&vault_path)
+                .args(["rev-list", "--count", "@{u}..HEAD", "--", &relative_path])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| {
+                    String::from_utf8_lossy(&o.stdout)
+                        .trim()
+                        .parse::<u32>()
+                        .unwrap_or(0)
+                });
+            match unpushed {
+                Some(0) => "synced".to_string(),
+                Some(_) => "unpushed".to_string(),
+                // No upstream configured -> we cannot tell.
+                None => "unknown".to_string(),
+            }
+        };
+
+        Ok(ShareLink {
+            url,
+            provider,
+            relative_path,
+            branch: git_ref,
+            sync_state,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?
+}
+
+#[cfg(test)]
+mod share_link_tests {
+    use super::{encode_url_path, remote_to_web_base};
+
+    #[test]
+    fn parses_ssh_scp_remote() {
+        let (base, provider) = remote_to_web_base("git@github.com:JemXiaolong/Potato.git");
+        assert_eq!(base, "https://github.com/JemXiaolong/Potato");
+        assert_eq!(provider, "github");
+    }
+
+    #[test]
+    fn parses_ssh_url_remote() {
+        let (base, provider) = remote_to_web_base("ssh://git@github.com/org/repo.git");
+        assert_eq!(base, "https://github.com/org/repo");
+        assert_eq!(provider, "github");
+    }
+
+    #[test]
+    fn parses_https_remote_with_credentials() {
+        let (base, provider) = remote_to_web_base("https://user:token@github.com/org/repo.git");
+        assert_eq!(base, "https://github.com/org/repo");
+        assert_eq!(provider, "github");
+    }
+
+    #[test]
+    fn parses_gitlab_subgroups() {
+        let (base, provider) = remote_to_web_base("git@gitlab.com:group/sub/repo.git");
+        assert_eq!(base, "https://gitlab.com/group/sub/repo");
+        assert_eq!(provider, "gitlab");
+    }
+
+    #[test]
+    fn rejects_unknown_hosts_and_empty_remotes() {
+        assert_eq!(remote_to_web_base("").1, "none");
+        assert_eq!(remote_to_web_base("git@bitbucket.org:org/repo.git").1, "unsupported");
+        assert_eq!(remote_to_web_base("/srv/git/repo.git").1, "unsupported");
+    }
+
+    #[test]
+    fn keeps_repo_names_ending_in_git() {
+        let (base, _) = remote_to_web_base("git@github.com:org/config.git.git");
+        assert_eq!(base, "https://github.com/org/config.git");
+    }
+
+    #[test]
+    fn encodes_spaces_and_accents_but_not_separators() {
+        assert_eq!(
+            encode_url_path("notas/mi nota.md"),
+            "notas/mi%20nota.md"
+        );
+        assert_eq!(encode_url_path("año.md"), "a%C3%B1o.md");
+    }
+}
+
 #[tauri::command]
 async fn git_changed_files(path: String) -> Result<Vec<GitFileChange>, String> {
     tokio::task::spawn_blocking(move || {
@@ -1715,6 +1967,7 @@ pub fn run() {
             git_status,
             git_pull,
             git_changed_files,
+            git_share_link,
             git_stage_files,
             git_commit,
             git_push,
