@@ -2648,9 +2648,11 @@ checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "potato"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "dirs",
+ "glib",
+ "gtk",
  "regex",
  "rfd",
  "serde",
@@ -2659,6 +2661,7 @@ dependencies = [
  "tauri-build",
  "tokio",
  "walkdir",
+ "webkit2gtk",
 ]
 
 [[package]]

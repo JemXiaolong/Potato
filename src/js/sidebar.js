@@ -49,6 +49,72 @@ const Sidebar = {
     this._changedPaths = new Set(absolutePaths);
   },
 
+  // -- Sorting ---------------------------------------------------------------
+
+  // 'name-asc' | 'name-desc' | 'mtime-desc' | 'mtime-asc'
+  _sortMode: 'name-asc',
+  _entries: null,
+
+  setSortMode(mode) {
+    this._sortMode = mode;
+  },
+
+  /** Re-render the current tree with the active sort order. */
+  rerender() {
+    if (this._entries) this.render(this._entries);
+  },
+
+  getSortMode() {
+    return this._sortMode;
+  },
+
+  /**
+   * Order a tree level, then recurse.
+   *
+   * Directories always stay above files: mixing them makes a tree much harder
+   * to scan, and it is what every file manager does. The chosen order applies
+   * within each of those two groups.
+   */
+  _sortEntries(entries) {
+    const mode = this._sortMode;
+
+    // localeCompare so accented names land where a Spanish speaker expects.
+    const byName = (a, b) =>
+      a.name.localeCompare(b.name, 'es', { sensitivity: 'base', numeric: true });
+
+    let compare;
+    switch (mode) {
+      case 'name-desc':
+        compare = (a, b) => byName(b, a);
+        break;
+      case 'mtime-desc':
+        // Equal timestamps fall back to name so the order stays stable.
+        compare = (a, b) => (b.mtime || 0) - (a.mtime || 0) || byName(a, b);
+        break;
+      case 'mtime-asc':
+        compare = (a, b) => (a.mtime || 0) - (b.mtime || 0) || byName(a, b);
+        break;
+      default:
+        compare = byName;
+    }
+
+    const dirs = [];
+    const files = [];
+    for (const entry of entries) {
+      (entry.is_dir ? dirs : files).push(entry);
+    }
+    dirs.sort(compare);
+    files.sort(compare);
+
+    for (const dir of dirs) {
+      if (dir.children && dir.children.length) {
+        dir.children = this._sortEntries(dir.children);
+      }
+    }
+
+    return dirs.concat(files);
+  },
+
   render(entries) {
     // Save expanded directories before re-render
     const expanded = new Set();
@@ -56,8 +122,11 @@ const Sidebar = {
       if (el.dataset.path) expanded.add(el.dataset.path);
     });
 
+    // Keep the last tree so a sort change can re-render without re-reading it.
+    this._entries = entries;
+
     this._container.innerHTML = '';
-    this._renderEntries(entries, this._container, 0);
+    this._renderEntries(this._sortEntries(entries), this._container, 0);
 
     // Restore expanded directories
     if (expanded.size > 0) {

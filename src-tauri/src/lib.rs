@@ -15,6 +15,10 @@ pub struct FileEntry {
     name: String,
     path: String,
     is_dir: bool,
+    /// Last modification time in milliseconds since the epoch. For directories
+    /// this is the most recent mtime found anywhere inside, so a folder sorts by
+    /// how recently its contents changed.
+    mtime: u64,
     children: Vec<FileEntry>,
 }
 
@@ -78,11 +82,16 @@ fn build_tree(dir: &PathBuf) -> Vec<FileEntry> {
         }
 
         if path.is_dir() {
+            let children = build_tree(&path);
+            // Roll up the newest descendant so folder ordering reflects activity
+            // inside it, not just when the directory entry itself changed.
+            let newest_child = children.iter().map(|c| c.mtime).max().unwrap_or(0);
             dirs.push(FileEntry {
                 name,
                 path: path.to_string_lossy().to_string(),
                 is_dir: true,
-                children: build_tree(&path),
+                mtime: entry_mtime(&entry).max(newest_child),
+                children,
             });
         } else if path.extension().is_some_and(|e| e == "md") {
             files.push(FileEntry {
@@ -93,15 +102,29 @@ fn build_tree(dir: &PathBuf) -> Vec<FileEntry> {
                     .to_string(),
                 path: path.to_string_lossy().to_string(),
                 is_dir: false,
+                mtime: entry_mtime(&entry),
                 children: vec![],
             });
         }
     }
 
+    // Name order is the default; the sidebar re-sorts client-side so changing
+    // the order does not require re-reading the vault.
     dirs.sort_by(|a, b| a.name.cmp(&b.name));
     files.sort_by(|a, b| a.name.cmp(&b.name));
     dirs.extend(files);
     dirs
+}
+
+/// Modification time of a directory entry in milliseconds, 0 when unavailable.
+fn entry_mtime(entry: &fs::DirEntry) -> u64 {
+    entry
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 // -- Comandos: Notas ---------------------------------------------------------
@@ -114,6 +137,52 @@ fn read_note(path: String) -> Result<String, String> {
 #[tauri::command]
 fn save_note(path: String, content: String) -> Result<(), String> {
     fs::write(&path, &content).map_err(|e| e.to_string())
+}
+
+/// Forward a frontend log line to stderr.
+///
+/// WebKitGTK does not surface `console.*` or uncaught errors to the terminal,
+/// which made frontend failures invisible outside the inspector. The frontend
+/// installs error handlers that call this so `npm run dev` shows them.
+#[tauri::command]
+fn log_frontend(level: String, message: String) {
+    eprintln!("[frontend/{}] {}", level, message);
+}
+
+/// Note to open automatically at startup, from POTATO_DIAG_NOTE.
+///
+/// Debug affordance for reproducing load problems on a specific file without
+/// having to click through the UI.
+#[tauri::command]
+fn diag_note_path() -> Option<String> {
+    std::env::var("POTATO_DIAG_NOTE").ok().filter(|v| !v.is_empty())
+}
+
+#[derive(Serialize)]
+struct NoteStat {
+    size: u64,
+    /// Modification time in milliseconds since the epoch.
+    mtime: u64,
+}
+
+/// Cheap change probe for a note.
+///
+/// External-change detection used to read the whole file back and compare it as
+/// a string, which on a multi-megabyte note ran on every window focus. Size and
+/// mtime answer the same question without touching the contents.
+#[tauri::command]
+fn note_stat(path: String) -> Result<NoteStat, String> {
+    let meta = fs::metadata(&path).map_err(|e| e.to_string())?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    Ok(NoteStat {
+        size: meta.len(),
+        mtime,
+    })
 }
 
 #[tauri::command]
@@ -711,6 +780,121 @@ fn pick_folder() -> Option<String> {
         .set_title("Elegir carpeta destino")
         .pick_folder()
         .map(|p| p.to_string_lossy().to_string())
+}
+
+// -- Comandos: Export PDF ----------------------------------------------------
+
+/// Ask the user where to save the exported PDF.
+#[tauri::command]
+fn pick_pdf_path(default_name: String) -> Option<String> {
+    let safe_name = if default_name.trim().is_empty() {
+        "nota.pdf".to_string()
+    } else {
+        default_name
+    };
+    rfd::FileDialog::new()
+        .set_title("Guardar PDF")
+        .set_file_name(&safe_name)
+        .add_filter("PDF", &["pdf"])
+        .save_file()
+        .map(|p| {
+            let mut p = p;
+            if p.extension().is_none() {
+                p.set_extension("pdf");
+            }
+            p.to_string_lossy().to_string()
+        })
+}
+
+/// Export the current webview contents to a PDF file.
+///
+/// This drives WebKit's own print operation rather than an external converter,
+/// so the PDF is laid out by the same engine that renders the preview and needs
+/// no extra runtime dependency (chromium, wkhtmltopdf). What gets printed is
+/// controlled entirely by the `@media print` stylesheet.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+async fn export_pdf(window: tauri::WebviewWindow, output_path: String) -> Result<String, String> {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    // GTK writes to a URI, not a bare path.
+    let path_buf = PathBuf::from(&output_path);
+    if let Some(parent) = path_buf.parent() {
+        if !parent.exists() {
+            return Err(format!("La carpeta destino no existe: {}", parent.display()));
+        }
+    }
+    let uri = format!("file://{}", output_path);
+    let result_path = output_path.clone();
+
+    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+
+    window
+        .with_webview(move |webview| {
+            use webkit2gtk::{PrintOperation, PrintOperationExt};
+
+            let settings = gtk::PrintSettings::new();
+            // The "Print to File" backend is what turns a print job into a PDF.
+            settings.set_printer("Print to File");
+            settings.set(gtk::PRINT_SETTINGS_OUTPUT_URI.as_str(), Some(uri.as_str()));
+            settings.set(
+                gtk::PRINT_SETTINGS_OUTPUT_FILE_FORMAT.as_str(),
+                Some("pdf"),
+            );
+
+            // A4 with margins wide enough for the watermark to sit clear of text.
+            let page_setup = gtk::PageSetup::new();
+            page_setup.set_paper_size(&gtk::PaperSize::new(Some("iso_a4")));
+            page_setup.set_orientation(gtk::PageOrientation::Portrait);
+            page_setup.set_top_margin(12.0, gtk::Unit::Mm);
+            page_setup.set_bottom_margin(12.0, gtk::Unit::Mm);
+            page_setup.set_left_margin(14.0, gtk::Unit::Mm);
+            page_setup.set_right_margin(14.0, gtk::Unit::Mm);
+
+            let operation = PrintOperation::new(&webview.inner());
+            operation.set_print_settings(&settings);
+            operation.set_page_setup(&page_setup);
+
+            let tx_done = tx.clone();
+            operation.connect_finished(move |_| {
+                let _ = tx_done.send(Ok(()));
+            });
+            let tx_fail = tx.clone();
+            operation.connect_failed(move |_, err| {
+                let _ = tx_fail.send(Err(err.to_string()));
+            });
+
+            operation.print();
+
+            // print() returns immediately and the job continues on the GTK main
+            // loop. Dropping the operation here would cancel it, so the handle
+            // is deliberately leaked; it is freed when the process exits.
+            std::mem::forget(operation);
+        })
+        .map_err(|e| format!("No se pudo acceder al webview: {}", e))?;
+
+    // Large notes take a while to paginate, hence the generous ceiling.
+    match rx.recv_timeout(Duration::from_secs(180)) {
+        Ok(Ok(())) => {
+            if PathBuf::from(&result_path).exists() {
+                Ok(result_path)
+            } else {
+                Err("La impresion termino pero no se genero el archivo".to_string())
+            }
+        }
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err("La exportacion excedio el tiempo limite".to_string()),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+async fn export_pdf(
+    _window: tauri::WebviewWindow,
+    _output_path: String,
+) -> Result<String, String> {
+    Err("La exportacion a PDF solo esta implementada en Linux".to_string())
 }
 
 // -- Comandos: Search --------------------------------------------------------
@@ -1404,7 +1588,16 @@ async fn send_claude_message(
             args.push(sp.clone());
         }
 
-        args.push(message);
+        // Linux caps a single argv entry at MAX_ARG_STRLEN (128 KiB). The prompt
+        // carries the whole open note as context, so any sizeable note made the
+        // spawn fail outright with E2BIG. Large prompts go through stdin, which
+        // has no such limit. Small prompts keep using argv so the common path
+        // behaves exactly as before.
+        const ARGV_PROMPT_LIMIT: usize = 64 * 1024;
+        let prompt_via_stdin = message.len() > ARGV_PROMPT_LIMIT;
+        if !prompt_via_stdin {
+            args.push(message.clone());
+        }
 
         let binary = get_claude_binary()
             .map_err(|e| format!("No se encontro claude: {}", e))?;
@@ -1413,6 +1606,10 @@ async fn send_claude_message(
         cmd.args(&args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        if prompt_via_stdin {
+            cmd.stdin(Stdio::piped());
+        }
 
         if let Some(ref dir) = working_dir {
             if std::path::Path::new(dir).is_dir() {
@@ -1433,6 +1630,20 @@ async fn send_claude_message(
             })?;
 
         claude_register(&process_id, child.id());
+
+        // Feed the prompt on a separate thread: the child can block writing
+        // stdout while we are still writing stdin, and doing both on this thread
+        // would deadlock. Dropping the handle closes stdin so claude knows the
+        // prompt is complete.
+        if prompt_via_stdin {
+            if let Some(mut stdin) = child.stdin.take() {
+                std::thread::spawn(move || {
+                    use std::io::Write;
+                    let _ = stdin.write_all(message.as_bytes());
+                    let _ = stdin.flush();
+                });
+            }
+        }
 
         // Stderr en thread separado
         let stderr_handle = child.stderr.take();
@@ -1961,6 +2172,9 @@ pub fn run() {
             list_vault,
             read_note,
             save_note,
+            note_stat,
+            log_frontend,
+            diag_note_path,
             create_note,
             parse_wikilinks,
             git_clone,
@@ -1973,6 +2187,8 @@ pub fn run() {
             git_push,
             git_recent_files,
             pick_folder,
+            pick_pdf_path,
+            export_pdf,
             move_file,
             open_in_explorer,
             search_vault,

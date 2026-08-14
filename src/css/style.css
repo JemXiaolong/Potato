@@ -740,6 +740,54 @@ mark {
   display: none;
 }
 
+/* Share menu (popover anchored under the share button) */
+.share-menu {
+  position: fixed;
+  top: calc(var(--toolbar-h) + 4px);
+  right: 16px;
+  min-width: 168px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  z-index: 350;
+  display: none;
+}
+
+.share-menu.open {
+  display: block;
+}
+
+.share-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.929rem;
+  cursor: pointer;
+  transition: all 0.12s;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.share-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.share-menu-icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.share-menu-item:hover .share-menu-icon {
+  color: var(--accent);
+}
+
 /* Close note button */
 .close-note-btn {
   background: transparent;
@@ -836,12 +884,101 @@ mark {
 }
 
 .sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--text-muted);
   font-size: 0.714rem;
   font-weight: 700;
   letter-spacing: 2px;
-  padding: 14px 16px 10px;
+  padding: 14px 12px 10px 16px;
   flex-shrink: 0;
+}
+
+.sidebar-vault-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sort control */
+.sort-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--text-muted);
+  padding: 3px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.sort-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sort-btn.active {
+  color: var(--accent);
+}
+
+.sort-menu {
+  position: absolute;
+  top: calc(var(--toolbar-h) + 34px);
+  left: 12px;
+  min-width: 182px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px;
+  z-index: 320;
+  display: none;
+}
+
+.sort-menu.open {
+  display: block;
+}
+
+.sort-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.893rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  cursor: pointer;
+  transition: all 0.12s;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.sort-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sort-menu-check {
+  width: 11px;
+  flex-shrink: 0;
+  color: var(--accent);
+  /* Reserve the space so labels stay aligned whether or not it is shown. */
+  visibility: hidden;
+}
+
+.sort-menu-item.selected .sort-menu-check {
+  visibility: visible;
+}
+
+.sort-menu-item.selected {
+  color: var(--text-primary);
 }
 
 .sidebar-tree {
@@ -4008,3 +4145,430 @@ body.claude-maximized.claude-graph-active .claude-graph {
   100% { box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 }
 
+
+/* === Sectioned preview =====================================================
+ *
+ * The preview is split into sections so only the ones near the viewport hold
+ * DOM. Placeholders carry an inline min-height, which is why nothing here may
+ * constrain height.
+ */
+
+.pv-body {
+  display: block;
+}
+
+.pv-chunk {
+  display: block;
+  /* Isolates each section's layout so hydrating one does not force the
+   * browser to re-lay-out its siblings. */
+  contain: layout style;
+}
+
+.pv-chunk-error {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* === Print / PDF export ====================================================
+ *
+ * PDF export drives the webview's own print engine, so everything about the
+ * exported document's look is decided here. The app is a dark, fixed-height
+ * grid with absolutely positioned panes; print has to undo all of that and
+ * re-flow the preview as a normal document in a light reading theme.
+ *
+ * Page margins come from the GTK page setup (12mm/14mm), so CSS must not add
+ * its own or they would stack.
+ */
+
+.print-only {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  /* Backgrounds and rules are part of the design here, not decoration. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #24292f !important;
+  }
+
+  /* Escape the app shell: no grid, no viewport-height panes. */
+  body {
+    display: block !important;
+  }
+
+  .toolbar,
+  .sidebar,
+  .sidebar-resize,
+  .statusbar,
+  .toc-panel,
+  .claude-panel,
+  .claude-minimized-pill,
+  .modal-overlay,
+  .toast-container,
+  .share-menu,
+  .note-nav,
+  .compact-note-resize,
+  .editor,
+  .menu-dropdown,
+  .search-overlay {
+    display: none !important;
+  }
+
+  .content {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    overflow: visible !important;
+    grid-area: auto !important;
+  }
+
+  .preview {
+    position: static !important;
+    display: block !important;
+    inset: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #24292f !important;
+    font-family: var(--font-sans);
+    font-size: 10pt;
+    line-height: 1.5;
+  }
+
+  .print-only {
+    display: block;
+  }
+
+  /* --- Watermark ---
+   * Fixed position makes WebKit repeat it on every page. Sized and inset to
+   * read as a deliberate corner mark rather than a stray image. */
+  .print-watermark {
+    position: fixed;
+    top: 3mm;
+    right: 3mm;
+    width: 8.5mm;
+    opacity: 0.13;
+    z-index: 1000;
+  }
+
+  .print-watermark img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  /* --- Masthead (generated at export time) --- */
+  .print-header {
+    margin: 0 0 8mm;
+    /* Keep the title clear of the watermark. */
+    padding: 0 14mm 3.5mm 0;
+    border-bottom: 0.75pt solid #dde1e6;
+  }
+
+  .print-header-title {
+    font-size: 17pt;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: #14181c;
+    line-height: 1.15;
+    margin: 0 0 1.5mm;
+  }
+
+  .print-header-meta {
+    font-size: 7.5pt;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: #8a929c;
+  }
+
+  .print-header-meta span + span::before {
+    content: '  ·  ';
+    color: #c8cfd6;
+  }
+
+  /* --- Typography --- */
+  .preview h1,
+  .preview h2,
+  .preview h3,
+  .preview h4,
+  .preview h5,
+  .preview h6 {
+    color: #14181c !important;
+    font-weight: 700;
+    line-height: 1.25;
+    letter-spacing: -0.005em;
+    /* A heading stranded at the bottom of a page reads badly. */
+    break-after: avoid;
+    break-inside: avoid;
+    margin: 5.5mm 0 2mm;
+  }
+
+  .preview > *:first-child,
+  .print-header + * {
+    margin-top: 0;
+  }
+
+  .preview h1 {
+    font-size: 14pt;
+  }
+  .preview h2 {
+    font-size: 12pt;
+  }
+  .preview h3 {
+    font-size: 10.5pt;
+  }
+  .preview h4,
+  .preview h5,
+  .preview h6 {
+    font-size: 9.5pt;
+    color: #3b434d !important;
+  }
+
+  .preview p,
+  .preview li {
+    orphans: 3;
+    widows: 3;
+  }
+
+  .preview p {
+    margin: 0 0 2.5mm;
+  }
+
+  .preview strong {
+    color: #14181c !important;
+    font-weight: 700;
+  }
+
+  .preview em {
+    color: inherit !important;
+  }
+
+  .preview a {
+    color: #1a4f7a !important;
+    text-decoration: none;
+    border-bottom: 0.4pt solid #c3d4e2;
+  }
+
+  /* Wikilinks point at other notes, so a URL would be meaningless in print. */
+  .preview a.wikilink {
+    color: #5d4f8c !important;
+    border-bottom-style: dotted;
+  }
+
+  /* --- Code --- */
+  .preview pre {
+    background: #f7f8fa !important;
+    border: 0.5pt solid #e4e8ec !important;
+    border-radius: 1.2mm;
+    padding: 2mm 2.5mm !important;
+    margin: 0 0 3mm;
+    /* Printers cannot scroll, so long lines have to wrap. */
+    white-space: pre-wrap !important;
+    overflow-wrap: break-word;
+    overflow: visible !important;
+    break-inside: avoid;
+    font-size: 7.8pt;
+    line-height: 1.38;
+  }
+
+  .preview pre code,
+  .preview code {
+    color: #2b3138 !important;
+    background: transparent !important;
+    font-family: var(--font-mono);
+  }
+
+  /* Inline code: tight enough not to open gaps in the sentence. */
+  .preview :not(pre) > code {
+    background: #f1f3f6 !important;
+    border-radius: 0.8mm;
+    padding: 0 0.7mm;
+    font-size: 8.4pt;
+  }
+
+  /* Night Owl token colours are tuned for a dark background; on white they are
+   * mostly illegible, so print uses a light-appropriate palette. */
+  .preview .hljs-keyword,
+  .preview .hljs-selector-tag,
+  .preview .hljs-built_in {
+    color: #98246a !important;
+  }
+  .preview .hljs-string,
+  .preview .hljs-attr {
+    color: #0b6138 !important;
+  }
+  .preview .hljs-comment,
+  .preview .hljs-quote {
+    color: #78818c !important;
+    font-style: italic;
+  }
+  .preview .hljs-number,
+  .preview .hljs-literal {
+    color: #8f4600 !important;
+  }
+  .preview .hljs-title,
+  .preview .hljs-function .hljs-title,
+  .preview .hljs-section {
+    color: #1a4b8f !important;
+  }
+
+  /* --- Tables --- */
+  .preview table {
+    width: 100% !important;
+    border-collapse: collapse;
+    margin: 0 0 3.5mm;
+    font-size: 8pt;
+    break-inside: auto;
+  }
+
+  .preview thead {
+    /* Repeat the header when a table spans pages. */
+    display: table-header-group;
+  }
+
+  .preview tr {
+    break-inside: avoid;
+  }
+
+  .preview th,
+  .preview td {
+    border: 0.5pt solid #e4e8ec !important;
+    padding: 1.3mm 1.8mm !important;
+    text-align: left;
+    vertical-align: top;
+    color: #24292f !important;
+  }
+
+  .preview th {
+    background: #f4f6f8 !important;
+    font-weight: 700;
+    font-size: 7.5pt;
+    letter-spacing: 0.02em;
+    color: #3b434d !important;
+    /* Never let a narrow column stack a short header one letter per line. */
+    white-space: nowrap;
+  }
+
+  /* Only break inside cells, and only for tokens with no spaces (ids, paths)
+   * that would otherwise force the column wider than the page. */
+  .preview td {
+    overflow-wrap: break-word;
+  }
+
+  /* `anywhere` tries to move the whole token to the next line first and only
+   * splits it when it genuinely cannot fit, unlike break-all which chops every
+   * token mid-word. */
+  .preview td code {
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  /* --- Block elements --- */
+  .preview blockquote {
+    /* A tinted slab per quote made the page look boxy; a rule is enough. */
+    border-left: 1.5pt solid #d5dbe1 !important;
+    background: transparent !important;
+    color: #3f474f !important;
+    margin: 0 0 3mm;
+    padding: 0.5mm 0 0.5mm 3.5mm !important;
+    break-inside: auto;
+  }
+
+  .preview blockquote > *:last-child {
+    margin-bottom: 0;
+  }
+
+  .preview ul,
+  .preview ol {
+    margin: 0 0 3mm;
+    padding-left: 5.5mm;
+  }
+
+  .preview li {
+    margin-bottom: 0.8mm;
+  }
+
+  .preview li > p {
+    margin-bottom: 1mm;
+  }
+
+  .preview hr {
+    border: none;
+    border-top: 0.5pt solid #e4e8ec;
+    margin: 4.5mm 0;
+  }
+
+  .preview img,
+  .preview svg {
+    max-width: 100% !important;
+    height: auto !important;
+    break-inside: avoid;
+  }
+
+  .preview .mermaid-container {
+    background: #ffffff !important;
+    border: 0.5pt solid #e4e8ec;
+    border-radius: 1.2mm;
+    padding: 2mm;
+    margin: 0 0 3.5mm;
+    break-inside: avoid;
+    text-align: center;
+  }
+
+  /* Sections are a rendering device; they must not affect pagination. */
+  .pv-chunk {
+    display: block;
+    min-height: 0 !important;
+    contain: none !important;
+    break-inside: auto;
+  }
+
+  /* --- Frontmatter card --- */
+  .fm-card {
+    background: #f8f9fb !important;
+    border: 0.5pt solid #e4e8ec !important;
+    border-radius: 1.5mm;
+    padding: 2.5mm 3mm !important;
+    margin: 0 0 5mm !important;
+    break-inside: avoid;
+    font-size: 8.5pt;
+  }
+
+  .fm-card,
+  .fm-card * {
+    color: #3f474f !important;
+  }
+
+  .fm-title {
+    font-size: 12pt !important;
+    font-weight: 700;
+    color: #14181c !important;
+  }
+
+  .fm-status,
+  .fm-type,
+  .fm-priority,
+  .fm-tag,
+  .fm-task,
+  .fm-version {
+    border: 0.5pt solid #d5dbe1 !important;
+    background: #ffffff !important;
+    border-radius: 0.8mm;
+    padding: 0.3mm 1.2mm !important;
+    font-size: 7.5pt;
+  }
+}

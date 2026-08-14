@@ -47,7 +47,7 @@ ssh -T git@github.com  # Verificar conexion
 ### Desde .deb (usuarios)
 
 ```bash
-sudo dpkg -i POTATO_0.18.5_amd64.deb
+sudo dpkg -i POTATO_0.21.0_amd64.deb
 ```
 
 Si marca error de dependencias:
@@ -80,7 +80,11 @@ npm install
 npm run dev
 ```
 
-Los cambios en HTML/CSS/JS se reflejan al instante. Los cambios en Rust requieren reiniciar `npm run dev` (~20s de recompilacion).
+> **Ojo:** no hay hot-reload de frontend. `tauri.conf.json` usa `frontendDist`
+> sin `devUrl`, asi que Tauri solo vigila `src-tauri`. Los cambios en
+> HTML/CSS/JS requieren **recargar la ventana** (`Ctrl+R`) y los de Rust
+> reiniciar `npm run dev` (~20s de recompilacion). Si un cambio de frontend
+> "no aparece", casi siempre es esto.
 
 ### Compilar para distribucion
 
@@ -105,11 +109,16 @@ Genera los instaladores en `src-tauri/target/release/bundle/`:
 - Auto-guardado al dejar de escribir (configurable, 1.5s debounce)
 - Deteccion de cambios externos (auto-recarga si el archivo cambia)
 - Control de tamano de fuente (10-24px)
+- Exportacion a PDF con formato de lectura y marca de agua del logo
+- Soporte de notas de cualquier tamano (ver [Archivos grandes](#archivos-grandes))
 
 ### Sidebar y navegacion
 
 - Sidebar redimensionable con carpetas colapsables
 - Busqueda instantanea por nombre y contenido (Ctrl+P)
+- Orden configurable del arbol: nombre (A-Z / Z-A) o fecha de modificacion
+  (reciente / antiguo). Las carpetas siempre van antes que los archivos y el
+  orden se aplica dentro de cada grupo. La preferencia se guarda.
 - Drag & drop para mover archivos entre carpetas
 - Indicadores de archivos sin sincronizar (color configurable, 7 presets)
 - Persistencia de sesion (recuerda vault y nota al reabrir)
@@ -131,7 +140,11 @@ Genera los instaladores en `src-tauri/target/release/bundle/`:
     color ambar si la nota tiene cambios sin commitear o commits sin subir,
     porque en ese caso el enlace todavia no resuelve.
 - Soporte SSH y HTTPS con mensajes de error claros
-- Barra de progreso en tiempo real
+- Barra de progreso en tiempo real — **no funciona actualmente**: falta
+  `src-tauri/capabilities/`, asi que Tauri deniega `core:event:allow-listen` y
+  los eventos `git-progress` / `update-progress` nunca llegan al frontend. Se ve
+  en la terminal como `[frontend/rejection] event.listen not allowed`. Afecta
+  igual a la barra de descarga del auto-update.
 
 ### Asistente IA (Claude)
 
@@ -259,6 +272,7 @@ Las preferencias se guardan en `localStorage` y persisten entre sesiones.
 | `Ctrl+B` | Mostrar / ocultar sidebar |
 | `Ctrl+P` | Buscar notas y contenido |
 | `Ctrl+L` | Abrir / cerrar panel de Claude |
+| `Ctrl+Shift+P` | Exportar la nota a PDF |
 
 ### En el input de Claude
 
@@ -269,6 +283,85 @@ Las preferencias se guardan en `localStorage` y persisten entre sesiones.
 | `↑ / ↓` | Navegar autocompletado |
 | `Tab / Enter` | Aceptar autocompletado |
 | `Escape` | Cerrar autocompletado |
+
+### Exportacion a PDF
+
+Desde el boton **Compartir** de la barra superior (`Ctrl+Shift+P`) o el menu
+`Exportar a PDF`.
+
+El PDF lo genera el motor de impresion del propio webview (WebKit), no una
+herramienta externa, asi que no hace falta instalar chromium ni wkhtmltopdf y el
+resultado usa el mismo renderizado que ves en pantalla. El aspecto se define por
+completo en el bloque `@media print` de `style.css`:
+
+- Tema claro pensado para lectura e impresion, independiente del tema oscuro de
+  la app.
+- Cabecera con el titulo de la nota, su ruta relativa al vault y la fecha.
+- Logo como marca de agua en la esquina superior derecha, repetido en cada
+  pagina.
+- Las tablas repiten su encabezado al cruzar de pagina y las lineas largas de
+  codigo se envuelven, porque una hoja impresa no puede hacer scroll.
+
+Los margenes vienen del *page setup* de GTK (12mm verticales, 14mm laterales),
+por eso `@page` en CSS los deja en cero: si los definiera tambien, se sumarian.
+
+Antes de imprimir se renderiza el documento completo, saltandose el render por
+secciones. En una nota de varios MB eso tarda, y es inevitable: un PDF necesita
+todas las paginas.
+
+### Archivos grandes
+
+Una nota de 6 MB (~80,000 lineas) se abre en menos de un segundo. Lo que lo hace
+posible:
+
+- **Render por secciones.** El markdown se rebana en secciones con un solo
+  recorrido de lineas y solo se parsean las cercanas al viewport; el resto son
+  marcadores con altura estimada que se hidratan al hacer scroll y se liberan al
+  alejarse. El DOM se mantiene en el orden de miles de nodos en lugar de cientos
+  de miles.
+- **Nunca se parsea el documento completo.** `marked.lexer()` sobre entradas de
+  varios MB **se cuelga indefinidamente en JavaScriptCore** (el motor de
+  WebKitGTK), aunque V8 procese lo mismo en menos de un segundo. Por eso el
+  troceado es un escaneo de texto crudo que respeta bloques de codigo y tablas,
+  y cada seccion se lexea sola al hidratarse.
+- **Sin resaltado automatico de lenguaje.** `hljs.highlightAuto()` prueba todos
+  los lenguajes registrados por bloque; en una nota con ~800 bloques sin
+  etiquetar costaba 3.5s de un render de 4.4s. Solo se resaltan los bloques que
+  declaran su lenguaje en el fence.
+- **El preview no se re-renderiza cuando esta oculto.** En modo edicion se marca
+  como obsoleto y se reconstruye al cambiar de modo.
+- **Deteccion de cambios externos por tamano y mtime**, en lugar de releer el
+  archivo completo y comparar cadenas en cada foco de ventana.
+- **El indice se arma desde el escaneo de texto**, no recorriendo el DOM, asi
+  que funciona aunque la seccion del encabezado no este renderizada.
+
+**Limite conocido: la edicion.** El `<textarea>` del navegador remaquetea todo su
+contenido en cada pulsacion, lo que en una nota de 6 MB cuesta unos 800ms por
+tecla. Eso es interno del motor y no se puede optimizar desde aqui. Por eso las
+notas de mas de 1 MB abren en modo lectura y, si entras a editar, la app avisa
+que sera lento. La solucion real seria un editor virtualizado (CodeMirror), que
+hoy no se usa para mantener el proyecto sin dependencias de frontend.
+
+Consecuencia del render por secciones: el `Ctrl+F` del webview solo encuentra
+texto ya renderizado. Para buscar en todo el documento hay que usar `Ctrl+P`,
+que consulta el backend.
+
+### Depuracion del frontend
+
+WebKitGTK no manda `console.*` ni las excepciones no capturadas a la terminal,
+lo que hacia invisible cualquier fallo del frontend. La app instala manejadores
+de `error` y `unhandledrejection` que reenvian todo al backend, y aparece en la
+salida de `npm run dev` con el prefijo `[frontend/...]`. `Preview.update` ademas
+registra el tiempo de cada etapa en notas de mas de 512 KB.
+
+Para reproducir un problema al abrir un archivo concreto sin navegar por la
+interfaz:
+
+```bash
+POTATO_DIAG_NOTE=/ruta/a/la/nota.md npm run dev
+```
+
+Abre esa nota al arrancar y registra los tiempos de cada etapa.
 
 ## Publicar una nueva version
 

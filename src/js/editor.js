@@ -9,7 +9,10 @@ const Editor = {
     this._el = document.getElementById(elementId);
     this._onChange = onChange;
 
-    // Debounced input handler
+    // Debounced input handler. The delay scales with document size: on a
+    // multi-megabyte note the downstream work (lexing the whole document) costs
+    // far more than 150 ms, so firing that often just queues up work the user
+    // outruns anyway.
     let timeout;
     this._el.addEventListener('input', () => {
       clearTimeout(timeout);
@@ -17,7 +20,7 @@ const Editor = {
         if (this._onChange) {
           this._onChange(this._el.value);
         }
-      }, 150);
+      }, this._debounceFor(this._el.value.length));
     });
 
     // Tab key inserts spaces
@@ -25,27 +28,37 @@ const Editor = {
       if (e.key === 'Tab') {
         e.preventDefault();
         const start = this._el.selectionStart;
-        const end = this._el.selectionEnd;
-        this._el.value =
-          this._el.value.substring(0, start) +
-          '    ' +
-          this._el.value.substring(end);
-        this._el.selectionStart = this._el.selectionEnd = start + 4;
+        // setRangeText edits in place. Rebuilding value from two substrings
+        // copied the entire document twice per Tab press.
+        this._el.setRangeText('    ', start, this._el.selectionEnd, 'end');
         this._el.dispatchEvent(new Event('input'));
       }
     });
+  },
+
+  /** Input debounce in ms, widened for large documents. */
+  _debounceFor(length) {
+    if (length > 4 * 1024 * 1024) return 900;
+    if (length > 1024 * 1024) return 500;
+    if (length > 256 * 1024) return 300;
+    return 150;
   },
 
   getValue() {
     return this._el.value;
   },
 
-  setValue(content) {
+  /**
+   * Replace the editor contents.
+   *
+   * Pass { silent: true } when loading a note from disk. The change callback
+   * marks the document dirty and rebuilds the preview, neither of which is
+   * correct for content that was just read from the file.
+   */
+  setValue(content, options) {
     this._el.value = content;
-    // Trigger change callback
-    if (this._onChange) {
-      this._onChange(content);
-    }
+    if ((options && options.silent) || !this._onChange) return;
+    this._onChange(content);
   },
 
   show() {

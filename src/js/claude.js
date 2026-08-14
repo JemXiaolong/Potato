@@ -306,8 +306,8 @@ const Claude = {
     // Si hay una nota abierta, mostrar compact note
     if (App.state.currentNote) {
       document.body.classList.add('has-compact-note');
-      // Asegurar que preview este visible
-      Preview.update(Editor.getValue());
+      // Render through App so a preview that is already current is not rebuilt.
+      App._renderPreviewIfStale();
     }
 
     this.state.panelMode = 'maximized';
@@ -329,7 +329,7 @@ const Claude = {
   onNoteOpened() {
     if (this.state.panelMode === 'maximized') {
       document.body.classList.add('has-compact-note');
-      Preview.update(Editor.getValue());
+      App._renderPreviewIfStale();
     }
   },
 

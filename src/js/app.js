@@ -49,10 +49,11 @@ const App = {
       (filePath, fileName, destDir) => this._onFileDrop(filePath, fileName, destDir),
     );
 
+    this._initErrorForwarding();
+
     Editor.init('editor', (content) => {
       this.state.dirty = true;
-      Preview.update(content);
-      this._updateToc();
+      this._refreshPreview(content);
 
       // Auto-save after 1.5s of inactivity
       if (this.state.autosave) {
@@ -74,8 +75,12 @@ const App = {
     // Split view button
     document.getElementById('split-btn').addEventListener('click', () => this.toggleSplit());
 
-    // Share button
-    document.getElementById('share-btn').addEventListener('click', () => this.shareNote());
+    // Share button opens a small menu instead of acting directly, so link
+    // copying and PDF export live together without adding another toolbar icon.
+    this._initShareMenu();
+
+    // File-tree sort order
+    this._initSortMenu();
 
     // Font size controls
     document.getElementById('font-size-down').addEventListener('click', () => this._changeFontSize(-1));
@@ -117,6 +122,9 @@ const App = {
 
     // Restaurar sesion anterior
     await this._restoreSession();
+
+    // POTATO_DIAG_NOTE opens a specific note at startup for load diagnostics.
+    await this._openDiagNote();
 
     // Mostrar welcome si no hay nota abierta
     if (!this.state.currentNote) {
@@ -376,7 +384,31 @@ const App = {
     this.state.dirty = false;
     this._lastSavedContent = content;
 
-    Editor.setValue(content);
+    // Load without firing the change callback: a freshly opened note is not
+    // dirty, and letting onChange run marked the note dirty (causing a spurious
+    // full write-back 1.5s later) and rendered the preview a second time.
+    // A textarea holding megabytes of text re-lays-out on every input, costing
+    // ~800ms per keystroke at 6 MB. That is inside the browser's textarea, not
+    // something we can optimise, so large notes open in read mode (which is
+    // virtualized and fast) regardless of the remembered mode.
+    if (content.length > this.LARGE_NOTE_BYTES && this.state.mode !== 'read') {
+      this.state.mode = 'read';
+      this._showToast('Nota grande: abierta en modo lectura', 'warn', 4000);
+    }
+    this._largeNoteWarned = false;
+
+    // Decide editor visibility BEFORE loading the content. Assigning megabytes
+    // into a *visible* textarea makes WebKit lay out every line (~1.6s for an
+    // 80k-line note) even when read mode is about to hide it again.
+    if (this.state.mode === 'read') {
+      Editor.hide();
+    } else {
+      Editor.show();
+    }
+
+    Editor.setValue(content, { silent: true });
+    this._previewStale = true;
+    await this._recordNoteStat();
     this._setTitle(title);
     this._setStatus(title);
 
@@ -413,6 +445,7 @@ const App = {
     document.getElementById('close-note-btn').classList.add('hidden');
     document.getElementById('split-btn').classList.add('hidden');
     document.getElementById('share-btn').classList.add('hidden');
+    document.getElementById('share-menu').classList.remove('open');
     document.getElementById('note-nav').classList.add('hidden');
 
     // Reset split mode, TOC, and clean up
@@ -421,7 +454,12 @@ const App = {
     content.classList.remove('toc-visible');
     document.getElementById('toc-panel').classList.add('hidden');
     this.state.mode = 'read';
-    Editor.setValue('');
+    // Silent: _showWelcome below replaces the preview anyway, so there is no
+    // point rendering an empty document first (which also tears down the old
+    // note's DOM twice).
+    Editor.setValue('', { silent: true });
+    Preview.clear();
+    this._previewStale = true;
     Editor.hide();
     this._setTitle('');
 
@@ -473,6 +511,7 @@ const App = {
       content,
     });
     this._lastSavedContent = content;
+    await this._recordNoteStat();
     this.state.dirty = false;
     this._setStatus('Guardado');
     setTimeout(() => {
@@ -567,7 +606,33 @@ const App = {
 
   // -- Mode ----------------------------------------------------------------
 
+  /** Past this size the textarea becomes the bottleneck, not the renderer. */
+  LARGE_NOTE_BYTES: 1024 * 1024,
+
+  _largeNoteWarned: false,
+
+  /** True when the open note is big enough for editing to feel slow. */
+  _isLargeNote() {
+    return Editor.getValue().length > this.LARGE_NOTE_BYTES;
+  },
+
   setMode(mode) {
+    // Entering an editing mode on a large note is allowed, but say so first:
+    // the slowness is inherent to the textarea and would otherwise look like a
+    // freeze with no explanation.
+    if (mode !== 'read' && this._isLargeNote() && !this._largeNoteWarned) {
+      this._largeNoteWarned = true;
+      const mb = (Editor.getValue().length / 1024 / 1024).toFixed(1);
+      this._showToast(
+        `Nota de ${mb} MB: la edicion sera lenta al escribir`,
+        'warn',
+        6000
+      );
+    }
+    return this._setModeInternal(mode);
+  },
+
+  _setModeInternal(mode) {
     this.state.mode = mode;
     const content = document.querySelector('.content');
     const splitBtn = document.getElementById('split-btn');
@@ -589,18 +654,44 @@ const App = {
       Editor.focus();
     } else if (mode === 'split') {
       content.classList.add('split-mode');
-      Preview.update(Editor.getValue());
+      this._renderPreviewIfStale();
       Editor.show();
       Preview.show();
       Editor.focus();
     } else {
-      Preview.update(Editor.getValue());
+      this._renderPreviewIfStale();
       Editor.hide();
       Preview.show();
     }
 
     // Update TOC after mode change
     this._updateToc();
+  },
+
+  // The preview is only worth rebuilding when it is on screen. In edit mode it
+  // is display:none, so re-parsing on every keystroke was pure waste; instead
+  // the content is marked stale and rendered when the user switches modes.
+  _previewStale: true,
+
+  _refreshPreview(content) {
+    if (this.state.mode === 'edit') {
+      this._previewStale = true;
+      return;
+    }
+    Preview.update(content);
+    this._previewStale = false;
+    this._updateToc();
+  },
+
+  _renderPreviewIfStale(force) {
+    if (!force && !this._previewStale) return;
+    Preview.update(Editor.getValue());
+    this._previewStale = false;
+  },
+
+  /** Mark the preview as needing a rebuild without doing the work now. */
+  invalidatePreview() {
+    this._previewStale = true;
   },
 
   toggleMode() {
@@ -662,6 +753,10 @@ const App = {
         case 'e':
           e.preventDefault();
           this.toggleSplit();
+          return;
+        case 'p':
+          e.preventDefault();
+          this.exportPdf();
           return;
       }
     }
@@ -761,6 +856,11 @@ const App = {
     document.getElementById('menu-open-folder').addEventListener('click', () => {
       dropdown.classList.remove('open');
       this._openInExplorer();
+    });
+
+    document.getElementById('menu-export-pdf').addEventListener('click', () => {
+      dropdown.classList.remove('open');
+      this.exportPdf();
     });
 
     document.getElementById('menu-settings').addEventListener('click', () => {
@@ -1520,18 +1620,29 @@ const App = {
       return;
     }
 
+    // One delegated listener instead of one closure per heading: a large note
+    // can have thousands of entries and the list is rebuilt on every render.
     list.innerHTML = '';
+    const fragment = document.createDocumentFragment();
     for (const h of headings) {
       const item = document.createElement('div');
       item.className = 'toc-item h' + h.level;
       item.textContent = h.text;
-      item.addEventListener('click', () => {
-        const target = document.getElementById(h.id);
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+      item.dataset.headingId = h.id;
+      fragment.appendChild(item);
+    }
+    list.appendChild(fragment);
+
+    if (!this._tocClickBound) {
+      this._tocClickBound = true;
+      list.addEventListener('click', (e) => {
+        const item = e.target.closest('.toc-item');
+        if (!item) return;
+        // The target heading may live in a section that is still a placeholder,
+        // so ask the preview to hydrate it before scrolling.
+        const target = Preview.revealHeading(item.dataset.headingId);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
-      list.appendChild(item);
     }
 
     panel.classList.remove('hidden');
@@ -1541,6 +1652,22 @@ const App = {
   // -- External change detection -----------------------------------------------
 
   _focusCooldown: false,
+  _lastSavedStat: null,
+
+  /** Remember the on-disk fingerprint of the current note. */
+  async _recordNoteStat() {
+    if (!this.state.currentNote) {
+      this._lastSavedStat = null;
+      return;
+    }
+    try {
+      this._lastSavedStat = await this.invoke('note_stat', {
+        path: this.state.currentNote.path,
+      });
+    } catch (err) {
+      this._lastSavedStat = null;
+    }
+  },
 
   async _onWindowFocus() {
     if (!this.state.vaultPath || this._focusCooldown) return;
@@ -1556,6 +1683,15 @@ const App = {
     if (!this.state.currentNote) return;
 
     try {
+      // Probe size/mtime first. Reading the whole note back on every focus was
+      // the single most expensive idle operation on large files.
+      const stat = await this.invoke('note_stat', { path: this.state.currentNote.path });
+      if (stat && this._lastSavedStat
+          && stat.size === this._lastSavedStat.size
+          && stat.mtime === this._lastSavedStat.mtime) {
+        return;
+      }
+
       const diskContent = await this.invoke('read_note', { path: this.state.currentNote.path });
 
       if (diskContent === null) {
@@ -1570,10 +1706,14 @@ const App = {
       // Compare with last saved version (not editor, to detect external edits)
       if (this._lastSavedContent !== null && diskContent !== this._lastSavedContent) {
         if (!this.state.dirty) {
-          // No local changes: reload silently
-          Editor.setValue(diskContent);
+          // No local changes: reload silently. Silent setValue plus one
+          // explicit render, instead of setValue's callback rendering once and
+          // Preview.update rendering the same content again.
+          Editor.setValue(diskContent, { silent: true });
           this._lastSavedContent = diskContent;
-          Preview.update(diskContent);
+          await this._recordNoteStat();
+          this._previewStale = true;
+          this._renderPreviewIfStale();
           this._updateToc();
           this._setStatus('Nota recargada');
           setTimeout(() => {
@@ -1692,6 +1832,256 @@ const App = {
       btn.classList.remove('copied');
       if (this.state.currentNote) this._setStatus(this.state.currentNote.title);
     }, 2500);
+  },
+
+  // -- File tree sort order --------------------------------------------------
+
+  _initSortMenu() {
+    const btn = document.getElementById('sort-btn');
+    const menu = document.getElementById('sort-menu');
+
+    // Restore the saved order before the first render.
+    const stored = localStorage.getItem('potato-sort-mode');
+    const valid = ['name-asc', 'name-desc', 'mtime-desc', 'mtime-asc'];
+    const mode = valid.includes(stored) ? stored : 'name-asc';
+    Sidebar.setSortMode(mode);
+    this._markSortSelection(mode);
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.classList.toggle('open');
+    });
+    document.addEventListener('click', () => menu.classList.remove('open'));
+    menu.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') menu.classList.remove('open');
+    });
+
+    menu.querySelectorAll('.sort-menu-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        menu.classList.remove('open');
+        this.setSortMode(item.dataset.sort);
+      });
+    });
+  },
+
+  setSortMode(mode) {
+    if (mode === Sidebar.getSortMode()) return;
+
+    Sidebar.setSortMode(mode);
+    localStorage.setItem('potato-sort-mode', mode);
+    this._markSortSelection(mode);
+    // Re-sort the tree already in memory; no need to re-read the vault.
+    Sidebar.rerender();
+    if (this.state.currentNote) Sidebar.setActive(this.state.currentNote.path);
+  },
+
+  _markSortSelection(mode) {
+    document.querySelectorAll('#sort-menu .sort-menu-item').forEach((item) => {
+      item.classList.toggle('selected', item.dataset.sort === mode);
+    });
+    // Highlight the button when the order is not the default.
+    document.getElementById('sort-btn').classList.toggle('active', mode !== 'name-asc');
+  },
+
+  // -- Diagnostics -----------------------------------------------------------
+
+  /**
+   * Send frontend errors to the Rust side so they appear in the terminal.
+   *
+   * WebKitGTK keeps console output and uncaught exceptions inside the inspector,
+   * so a thrown error during note loading looked like "nothing happened".
+   */
+  _initErrorForwarding() {
+    const send = (level, message) => {
+      try {
+        this.invoke('log_frontend', { level, message: String(message).slice(0, 4000) });
+      } catch (e) {
+        /* logging must never itself break the app */
+      }
+    };
+
+    window.addEventListener('error', (e) => {
+      const where = e.filename ? ` (${e.filename}:${e.lineno}:${e.colno})` : '';
+      const stack = e.error && e.error.stack ? '\n' + e.error.stack : '';
+      send('error', (e.message || 'error') + where + stack);
+    });
+
+    window.addEventListener('unhandledrejection', (e) => {
+      const reason = e.reason;
+      const detail = reason && reason.stack ? reason.stack : String(reason);
+      send('rejection', detail);
+    });
+
+    this.log = send;
+  },
+
+  /** Log a message to the terminal; no-op safe before init. */
+  log(level, message) {
+    /* replaced by _initErrorForwarding */
+  },
+
+  async _openDiagNote() {
+    let target = null;
+    try {
+      target = await this.invoke('diag_note_path');
+    } catch (err) {
+      return;
+    }
+    if (!target) return;
+
+    this.log('diag', 'opening ' + target);
+    const started = performance.now();
+    try {
+      const title = target.split('/').pop();
+      await this.openNote(target, title);
+      this.log('diag', `openNote completed in ${(performance.now() - started).toFixed(0)}ms`);
+    } catch (err) {
+      this.log('diag', 'openNote threw: ' + (err && err.stack ? err.stack : err));
+    }
+  },
+
+  // -- Share menu ------------------------------------------------------------
+
+  _initShareMenu() {
+    const btn = document.getElementById('share-btn');
+    const menu = document.getElementById('share-menu');
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.classList.toggle('open');
+    });
+
+    // Any click elsewhere dismisses it.
+    document.addEventListener('click', () => menu.classList.remove('open'));
+    menu.addEventListener('click', (e) => e.stopPropagation());
+
+    document.getElementById('share-menu-link').addEventListener('click', () => {
+      menu.classList.remove('open');
+      this.shareNote();
+    });
+
+    document.getElementById('share-menu-pdf').addEventListener('click', () => {
+      menu.classList.remove('open');
+      this.exportPdf();
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') menu.classList.remove('open');
+    });
+  },
+
+  // -- PDF export ------------------------------------------------------------
+
+  _exporting: false,
+
+  /**
+   * Export the open note to PDF.
+   *
+   * The webview's print engine lays out whatever is in the DOM, so every
+   * section has to be hydrated first (lazy rendering is exactly wrong here) and
+   * the print-only header has to be injected before the job starts.
+   */
+  async exportPdf() {
+    if (!this.state.currentNote) {
+      this._showToast('Abre una nota antes de exportar', 'warn');
+      return;
+    }
+    if (this._exporting) return;
+    this._exporting = true;
+
+    const previousMode = this.state.mode;
+    const title = this.state.currentNote.title.replace(/\.md$/i, '');
+
+    try {
+      const content = Editor.getValue();
+      if (content.length > 2 * 1024 * 1024) {
+        this._showToast('Nota grande: preparando el PDF, puede tardar…', 'warn', 8000);
+      } else {
+        this._showToast('Preparando el PDF…', 'success', 8000);
+      }
+
+      // Let the toast paint before the render blocks the thread.
+      await this._nextFrame();
+
+      // Print needs the complete document, not just the visible sections.
+      Preview.update(content, { full: true });
+      await Preview.renderAll();
+      this._previewStale = true;
+
+      this._buildPrintHeader(title);
+
+      const targetPath = await this.invoke('pick_pdf_path', {
+        defaultName: title + '.pdf',
+      });
+      if (!targetPath) {
+        this._setStatus(this.state.currentNote.title);
+        return;
+      }
+
+      const savedPath = await this.invoke('export_pdf', { outputPath: targetPath });
+      const fileName = String(savedPath).split('/').pop();
+      this._showToast('PDF guardado: ' + fileName, 'success', 5000);
+    } catch (err) {
+      console.warn('PDF export failed:', err);
+      this._showToast('No se pudo exportar el PDF: ' + err, 'error', 6000);
+    } finally {
+      this._removePrintHeader();
+      this._exporting = false;
+      // Rebuild the normal, lazily rendered preview so the app is not left
+      // holding the fully expanded DOM.
+      this.setMode(previousMode);
+      this._renderPreviewIfStale(true);
+      this._updateToc();
+    }
+  },
+
+  _nextFrame() {
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  },
+
+  _buildPrintHeader(title) {
+    this._removePrintHeader();
+
+    const header = document.createElement('div');
+    header.className = 'print-header print-only';
+    header.id = 'print-header';
+
+    const heading = document.createElement('div');
+    heading.className = 'print-header-title';
+    heading.textContent = title;
+    header.appendChild(heading);
+
+    const meta = document.createElement('div');
+    meta.className = 'print-header-meta';
+
+    // Vault-relative path locates the note without leaking the whole home dir.
+    let relative = this.state.currentNote.path;
+    if (this.state.vaultPath && relative.startsWith(this.state.vaultPath)) {
+      relative = relative.slice(this.state.vaultPath.length).replace(/^\//, '');
+    }
+
+    const pathSpan = document.createElement('span');
+    pathSpan.textContent = relative;
+    meta.appendChild(pathSpan);
+
+    const dateSpan = document.createElement('span');
+    dateSpan.textContent = new Date().toLocaleDateString('es-MX', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    meta.appendChild(dateSpan);
+
+    header.appendChild(meta);
+
+    const preview = document.getElementById('preview');
+    preview.insertBefore(header, preview.firstChild);
+  },
+
+  _removePrintHeader() {
+    const existing = document.getElementById('print-header');
+    if (existing) existing.remove();
   },
 
   // -- Toasts ----------------------------------------------------------------
@@ -2072,7 +2462,7 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.20.0',
+  _appVersion: '0.21.0',
   _updateUrl: null,
 
   async _checkForUpdates() {
