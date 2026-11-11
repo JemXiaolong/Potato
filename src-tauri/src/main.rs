@@ -1,11 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 {
-        match args[1].as_str() {
+    if let Some(arg) = std::env::args().nth(1) {
+        match arg.as_str() {
             "--version" | "-v" | "-V" => {
-                println!("Hola José, aquí está la versión");
                 println!("POTATO {}", env!("CARGO_PKG_VERSION"));
                 return;
             }

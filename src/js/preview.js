@@ -5,44 +5,13 @@ const Preview = {
   _el: null,
   _onWikilinkClick: null,
 
-  _mermaidReady: false,
-  _mermaidIdCounter: 0,
 
   init(elementId, onWikilinkClick) {
     this._el = document.getElementById(elementId);
     this._onWikilinkClick = onWikilinkClick;
 
-    // Inicializar Mermaid con tema dark
-    if (typeof mermaid !== 'undefined') {
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: 'dark',
-        themeVariables: {
-          darkMode: true,
-          background: '#0d1117',
-          primaryColor: '#1a3a5c',
-          primaryTextColor: '#d6deeb',
-          primaryBorderColor: '#1d3b53',
-          secondaryColor: '#1e3a5f',
-          secondaryTextColor: '#c8d6e5',
-          tertiaryColor: '#152d4a',
-          lineColor: '#5f7e97',
-          textColor: '#d6deeb',
-          mainBkg: '#1a3a5c',
-          nodeBorder: '#5f7e97',
-          clusterBkg: '#0d1b2a',
-          clusterBorder: '#1d3b53',
-          titleColor: '#c792ea',
-          edgeLabelBackground: '#0d1117',
-          nodeTextColor: '#d6deeb',
-        },
-        fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-        fontSize: 14,
-        flowchart: { curve: 'basis', padding: 20 },
-        sequence: { mirrorActors: false, bottomMarginAdj: 1 },
-      });
-      this._mermaidReady = true;
-    }
+    // Mermaid se carga bajo demanda (Util.ensureMermaid) la primera vez que
+    // una nota contiene un diagrama.
 
     // Configurar marked con highlight.js
     if (typeof marked !== 'undefined') {
@@ -59,7 +28,7 @@ const Preview = {
         // Mermaid: renderizar como contenedor de diagrama.
         // The id is derived from the diagram source so re-rendering the same
         // note reuses it and mermaid can skip already-processed diagrams.
-        if (lang === 'mermaid' && self._mermaidReady) {
+        if (lang === 'mermaid') {
           const id = 'mermaid-' + self._hash(text);
           return '<div class="mermaid-container">'
                + '<div class="mermaid" id="' + id + '">' + self._escapeHtml(text) + '</div>'
@@ -97,15 +66,26 @@ const Preview = {
       const href = link.getAttribute('href');
       if (!href) return;
 
+      // Anclas internas (#seccion): desplazarse al encabezado
+      if (href.startsWith('#')) {
+        const target = this.revealHeading(decodeURIComponent(href.slice(1)));
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+
       // Links externos → abrir en navegador del sistema
       if (href.startsWith('http://') || href.startsWith('https://')) {
         if (window.__TAURI__) {
-          window.__TAURI__.core.invoke('open_in_explorer', { path: href });
+          window.__TAURI__.core.invoke('open_in_explorer', { path: href })
+            .catch((err) => console.warn('No se pudo abrir el enlace:', err));
         } else {
           window.open(href, '_blank');
         }
         return;
       }
+
+      // Otros esquemas (mailto:, tel:, ...) no son notas del vault
+      if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return;
 
       // Links relativos → navegar a nota dentro del vault
       if (App.state.currentNote && App.state.vaultPath) {
@@ -128,11 +108,7 @@ const Preview = {
 
   // Escape text that goes into HTML as literal content.
   _escapeHtml(text) {
-    return String(text)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+    return Util.escapeHtml(text);
   },
 
   // Small, fast, non-cryptographic hash (FNV-1a) used to build stable ids.
@@ -212,12 +188,12 @@ const Preview = {
       pending: '#f59e0b', pendiente: '#f59e0b',
       cancelled: '#ef4444', cancelado: '#ef4444',
     };
-    return colors[status.toLowerCase().replace(/\s*-\s*/g, '-')] || '#6b7280';
+    return colors[String(status).toLowerCase().replace(/\s*-\s*/g, '-')] || '#6b7280';
   },
 
   // Status icon mapping
   _statusIcon(status) {
-    const s = status.toLowerCase();
+    const s = String(status).toLowerCase();
     if (s.includes('draft') || s.includes('borrador')) return '&#9998;';
     if (s.includes('progress') || s.includes('progreso')) return '&#9881;';
     if (s.includes('review') || s.includes('revis')) return '&#128270;';
@@ -232,12 +208,15 @@ const Preview = {
   _specialFields: new Set([
     'status', 'date', 'title', 'project', 'topic', 'author',
     'task_id', 'tags', 'type', 'priority', 'assignee', 'description',
+    'version',
   ]),
 
   // Render frontmatter as a styled card
   _renderFrontmatter(meta) {
     if (!meta) return '';
+    // Los valores vienen del archivo: se escapan antes de concatenarlos.
     const m = this._normalizeMeta(meta);
+    const esc = (v) => this._escapeHtml(Array.isArray(v) ? v.join(', ') : v);
 
     let html = '<div class="fm-card">';
 
@@ -248,47 +227,46 @@ const Preview = {
       const color = this._statusColor(m.status);
       const icon = this._statusIcon(m.status);
       html += '<span class="fm-status" style="--status-color:' + color + '">'
-            + icon + ' ' + m.status + '</span>';
+            + icon + ' ' + esc(m.status) + '</span>';
     }
-    if (m.type || m.tipo) {
-      const t = m.type || m.tipo;
-      html += '<span class="fm-type">' + t + '</span>';
+    if (m.type) {
+      html += '<span class="fm-type">' + esc(m.type) + '</span>';
     }
     if (m.priority) {
-      html += '<span class="fm-priority">' + m.priority + '</span>';
+      html += '<span class="fm-priority">' + esc(m.priority) + '</span>';
     }
     html += '</div>';
     if (m.date) {
-      html += '<span class="fm-date">' + m.date + '</span>';
+      html += '<span class="fm-date">' + esc(m.date) + '</span>';
     }
     html += '</div>';
 
     // Title (if present in frontmatter)
     if (m.title) {
-      html += '<div class="fm-title">' + m.title + '</div>';
+      html += '<div class="fm-title">' + esc(m.title) + '</div>';
     }
 
     // Project
     if (m.project) {
-      html += '<div class="fm-project">' + m.project + '</div>';
+      html += '<div class="fm-project">' + esc(m.project) + '</div>';
     }
 
     // Topic (subtitle)
     if (m.topic) {
-      html += '<div class="fm-topic">' + m.topic + '</div>';
+      html += '<div class="fm-topic">' + esc(m.topic) + '</div>';
     }
 
     // Description
     if (m.description) {
-      html += '<div class="fm-desc">' + m.description + '</div>';
+      html += '<div class="fm-desc">' + esc(m.description) + '</div>';
     }
 
     // Info row: author, assignee, task_id
     const infoParts = [];
-    if (m.author) infoParts.push('<span class="fm-info-item"><span class="fm-info-icon">&#9998;</span>' + m.author + '</span>');
-    if (m.assignee) infoParts.push('<span class="fm-info-item"><span class="fm-info-icon">&#128100;</span>' + m.assignee + '</span>');
-    if (m.task_id) infoParts.push('<span class="fm-info-item fm-task">' + m.task_id + '</span>');
-    if (m.version) infoParts.push('<span class="fm-info-item fm-version">' + m.version + '</span>');
+    if (m.author) infoParts.push('<span class="fm-info-item"><span class="fm-info-icon">&#9998;</span>' + esc(m.author) + '</span>');
+    if (m.assignee) infoParts.push('<span class="fm-info-item"><span class="fm-info-icon">&#128100;</span>' + esc(m.assignee) + '</span>');
+    if (m.task_id) infoParts.push('<span class="fm-info-item fm-task">' + esc(m.task_id) + '</span>');
+    if (m.version) infoParts.push('<span class="fm-info-item fm-version">' + esc(m.version) + '</span>');
     if (infoParts.length > 0) {
       html += '<div class="fm-info">' + infoParts.join('') + '</div>';
     }
@@ -297,7 +275,7 @@ const Preview = {
     if (m.tags && Array.isArray(m.tags) && m.tags.length > 0) {
       html += '<div class="fm-tags">';
       for (const tag of m.tags) {
-        html += '<span class="fm-tag">' + tag + '</span>';
+        html += '<span class="fm-tag">' + esc(tag) + '</span>';
       }
       html += '</div>';
     }
@@ -309,8 +287,8 @@ const Preview = {
     if (genericFields.length > 0) {
       html += '<div class="fm-extra">';
       for (const [key, val] of genericFields) {
-        const displayKey = key.replace(/_/g, ' ');
-        const displayVal = Array.isArray(val) ? val.join(', ') : val;
+        const displayKey = esc(key.replace(/_/g, ' '));
+        const displayVal = esc(val);
         html += '<div class="fm-extra-row">'
               + '<span class="fm-extra-key">' + displayKey + '</span>'
               + '<span class="fm-extra-val">' + displayVal + '</span>'
@@ -569,7 +547,7 @@ const Preview = {
     let html;
     try {
       // Only this slice is parsed, never the whole document.
-      html = marked.parse(chunk.text);
+      html = Util.renderMarkdown(chunk.text);
     } catch (e) {
       console.warn('Chunk render error:', e);
       html = '<p class="pv-chunk-error">No se pudo renderizar esta seccion.</p>';
@@ -591,10 +569,10 @@ const Preview = {
     this._renderMermaidIn(chunk.el);
   },
 
-  _dehydrate(chunk) {
+  _dehydrate(chunk, measuredHeight) {
     if (!chunk.rendered) return;
     // Freeze the measured height so removing the content does not shift scroll.
-    const measured = chunk.el.offsetHeight;
+    const measured = measuredHeight ?? chunk.el.offsetHeight;
     chunk.estHeight = measured || chunk.estHeight;
     chunk.el.style.minHeight = chunk.estHeight + 'px';
     chunk.el.innerHTML = '';
@@ -614,14 +592,18 @@ const Preview = {
     if (!this._chunks.length) return;
     const top = this._el.scrollTop;
     const bottom = top + this._el.clientHeight;
+    // Medir todo primero y mutar despues: intercalar lecturas de offsetTop
+    // con escrituras al DOM forzaba un reflow por cada seccion.
+    const far = [];
     for (const chunk of this._chunks) {
       if (!chunk.rendered) continue;
-      const el = chunk.el;
-      const elTop = el.offsetTop;
-      const elBottom = elTop + el.offsetHeight;
+      const elTop = chunk.el.offsetTop;
+      const height = chunk.el.offsetHeight;
+      const elBottom = elTop + height;
       const distance = elTop > bottom ? elTop - bottom : top - elBottom;
-      if (distance > this._dehydrateMargin) this._dehydrate(chunk);
+      if (distance > this._dehydrateMargin) far.push([chunk, height]);
     }
+    for (const [chunk, height] of far) this._dehydrate(chunk, height);
   },
 
   /**
@@ -636,11 +618,6 @@ const Preview = {
     }
     for (const chunk of this._chunks) this._hydrate(chunk);
     await this._renderMermaidIn(this._el);
-  },
-
-  /** True when some sections are still placeholders. */
-  isPartiallyRendered() {
-    return this._chunks.some((c) => !c.rendered);
   },
 
   /** Hydrate whatever section holds this heading, then return its element. */
@@ -660,15 +637,8 @@ const Preview = {
     return this._el.querySelector('#' + CSS.escape(id));
   },
 
-  async _renderMermaidIn(root) {
-    if (!this._mermaidReady || !root) return;
-    const nodes = root.querySelectorAll('.mermaid:not([data-processed])');
-    if (nodes.length === 0) return;
-    try {
-      await mermaid.run({ nodes });
-    } catch (e) {
-      console.warn('Mermaid render error:', e);
-    }
+  _renderMermaidIn(root) {
+    return Util.renderMermaidIn(root);
   },
 
   getHeadings() {

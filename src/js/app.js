@@ -224,7 +224,8 @@ const App = {
     try {
       const files = await this.invoke('git_recent_files', { path, limit: 50 });
       this._recentFiles = files || [];
-      this._buildRecentFilter();
+      this._recentAuthorFilter = '';
+      this._updateFilterLabel();
       this._renderRecentFiles();
     } catch (e) {
       console.warn('No se pudieron cargar archivos recientes:', e);
@@ -232,10 +233,7 @@ const App = {
   },
 
   _cleanRecentName(name) {
-    let clean = name.replace(/^\d{4}-\d{2}-\d{2}-/, '');
-    clean = clean.replace(/^t\d{4,6}-/, '');
-    clean = clean.replace(/[_-]/g, ' ');
-    return clean.charAt(0).toUpperCase() + clean.slice(1);
+    return Sidebar._cleanName(name);
   },
 
   _formatRecentDate(dateStr) {
@@ -260,12 +258,6 @@ const App = {
   },
 
   _recentAuthorFilter: '',
-
-  _buildRecentFilter() {
-    // Filter is now built into the avatar clicks
-    this._recentAuthorFilter = '';
-    this._updateFilterLabel();
-  },
 
   _updateFilterLabel() {
     const label = document.getElementById('recent-filter-label');
@@ -364,12 +356,24 @@ const App = {
 
   // -- Notes ---------------------------------------------------------------
 
+  /**
+   * Abre una nota. Los errores (archivo borrado, permisos, nombre invalido) se
+   * muestran como toast: openNote se llama desde muchos handlers sin catch.
+   */
   async openNote(path, title) {
+    try {
+      await this._openNote(path, title);
+    } catch (e) {
+      console.warn('No se pudo abrir la nota:', e);
+      this._showToast('No se pudo abrir la nota: ' + e, 'error');
+    }
+  },
+
+  async _openNote(path, title) {
     // Auto-guardar nota actual
     await this.saveCurrentNote();
 
     const content = await this.invoke('read_note', { path });
-    if (content === null) return;
 
     // Push al historial de navegación (solo si no es nav back/forward)
     if (!this._navInProgress) {
@@ -482,8 +486,11 @@ const App = {
     this._noteHistoryIndex--;
     const { path, title } = this._noteHistory[this._noteHistoryIndex];
     this._navInProgress = true;
-    await this.openNote(path, title);
-    this._navInProgress = false;
+    try {
+      await this.openNote(path, title);
+    } finally {
+      this._navInProgress = false;
+    }
   },
 
   async _noteNavForward() {
@@ -491,8 +498,11 @@ const App = {
     this._noteHistoryIndex++;
     const { path, title } = this._noteHistory[this._noteHistoryIndex];
     this._navInProgress = true;
-    await this.openNote(path, title);
-    this._navInProgress = false;
+    try {
+      await this.openNote(path, title);
+    } finally {
+      this._navInProgress = false;
+    }
   },
 
   _updateNoteNav() {
@@ -506,10 +516,16 @@ const App = {
     if (!this.state.currentNote || !this.state.dirty) return;
 
     const content = Editor.getValue();
-    await this.invoke('save_note', {
-      path: this.state.currentNote.path,
-      content,
-    });
+    try {
+      await this.invoke('save_note', {
+        path: this.state.currentNote.path,
+        content,
+      });
+    } catch (e) {
+      // La nota sigue marcada como sucia para reintentar en el siguiente guardado.
+      this._showToast('No se pudo guardar la nota: ' + e, 'error');
+      return;
+    }
     this._lastSavedContent = content;
     await this._recordNoteStat();
     this.state.dirty = false;
@@ -559,13 +575,16 @@ const App = {
 
       close();
 
-      const path = await this.invoke('create_note', {
-        vaultPath: this.state.vaultPath,
-        name,
-      });
-
-      await this.refreshVault();
-      await this.openNote(path, name);
+      try {
+        const path = await this.invoke('create_note', {
+          vaultPath: this.state.vaultPath,
+          name,
+        });
+        await this.refreshVault();
+        await this.openNote(path, name);
+      } catch (e) {
+        this._showToast('No se pudo crear la nota: ' + e, 'error');
+      }
     };
   },
 
@@ -574,20 +593,28 @@ const App = {
   async onWikilinkClick(target) {
     if (!this.state.vaultPath) return;
 
-    // Buscar la nota en el vault
-    const entries = await this.invoke('list_vault', { path: this.state.vaultPath });
+    // Buscar la nota en el arbol ya cargado por el sidebar (antes se releia
+    // el vault completo en cada clic).
+    const entries = Sidebar._entries && Sidebar._entries.length
+      ? Sidebar._entries
+      : await this.invoke('list_vault', { path: this.state.vaultPath });
     const found = this._findEntry(entries, target);
 
     if (found) {
       await this.openNote(found.path, found.name);
-    } else {
-      // Crear nota si no existe
+      return;
+    }
+
+    // Crear nota si no existe
+    try {
       const path = await this.invoke('create_note', {
         vaultPath: this.state.vaultPath,
         name: target,
       });
       await this.refreshVault();
       await this.openNote(path, target);
+    } catch (e) {
+      this._showToast('No se pudo crear la nota: ' + e, 'error');
     }
   },
 
@@ -689,11 +716,6 @@ const App = {
     this._previewStale = false;
   },
 
-  /** Mark the preview as needing a rebuild without doing the work now. */
-  invalidatePreview() {
-    this._previewStale = true;
-  },
-
   toggleMode() {
     this.setMode(this.state.mode === 'edit' ? 'read' : 'edit');
   },
@@ -713,9 +735,10 @@ const App = {
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       startX = e.clientX;
-      startWidth = document.body.style.getPropertyValue('--sidebar-w')
-        ? parseInt(document.body.style.getPropertyValue('--sidebar-w'))
-        : 240;
+      // Leer el valor actual (se escribe en documentElement, no en body).
+      startWidth = parseInt(
+        getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10
+      ) || 240;
 
       handle.classList.add('dragging');
       document.body.style.cursor = 'col-resize';
@@ -800,11 +823,19 @@ const App = {
       }
     }
 
-    // Escape para cerrar search o nota
+    // Escape para cerrar search o nota. Si otro componente ya lo manejo (modal,
+    // autocompletado, menus) o el foco esta en un campo, no cerrar la nota.
     if (e.key === 'Escape') {
       if (document.getElementById('search-overlay').classList.contains('open')) {
         this._closeSearch();
-      } else if (this.state.currentNote) {
+        return;
+      }
+      if (e.defaultPrevented
+          || document.querySelector('.modal-overlay.open, #menu-dropdown.open, #sort-menu.open, #share-menu.open')
+          || (e.target.closest && e.target.closest('input, select, textarea:not(#editor), [contenteditable="true"]'))) {
+        return;
+      }
+      if (this.state.currentNote) {
         this.closeNote();
       }
     }
@@ -1384,21 +1415,21 @@ const App = {
     }
   },
 
-  _applySyncColor(hex) { 
-    const r = parseInt(hex.slice(1, 3), 16); 
-    const g = parseInt(hex.slice(3, 5), 16); 
-    const b = parseInt(hex.slice(5, 7), 16); 
-    // Variante clara: blend 30% hacia blanco 
-    const lr = Math.round(r + (255 - r) * 0.3); 
-    const lg = Math.round(g + (255 - g) * 0.3); 
-    const lb = Math.round(b + (255 - b) * 0.3); 
-    const light = `#${lr.toString(16).padStart(2,'0')}${lg.toString(16).padStart(2,'0')}${lb.toString(16).padStart(2,'0')}`; 
-    const bg = `rgba(${r}, ${g}, ${b}, 0.12)`; 
-    const s = document.documentElement.style; 
-    s.setProperty('--sync-color', hex); 
-    s.setProperty('--sync-color-light', light); 
-    s.setProperty('--sync-color-bg', bg); 
-  }, 
+  _applySyncColor(hex) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    // Variante clara: blend 30% hacia blanco
+    const lr = Math.round(r + (255 - r) * 0.3);
+    const lg = Math.round(g + (255 - g) * 0.3);
+    const lb = Math.round(b + (255 - b) * 0.3);
+    const light = `#${lr.toString(16).padStart(2,'0')}${lg.toString(16).padStart(2,'0')}${lb.toString(16).padStart(2,'0')}`;
+    const bg = `rgba(${r}, ${g}, ${b}, 0.12)`;
+    const s = document.documentElement.style;
+    s.setProperty('--sync-color', hex);
+    s.setProperty('--sync-color-light', light);
+    s.setProperty('--sync-color-bg', bg);
+  },
 
   _loadSettings() {
     // Sync indicators
@@ -1692,7 +1723,9 @@ const App = {
         return;
       }
 
-      const diskContent = await this.invoke('read_note', { path: this.state.currentNote.path });
+      // read_note rechaza (no devuelve null) si el archivo ya no existe.
+      const diskContent = await this.invoke('read_note', { path: this.state.currentNote.path })
+        .catch(() => null);
 
       if (diskContent === null) {
         // File was deleted externally
@@ -2338,14 +2371,19 @@ const App = {
       this._highlightSearchResult(document.querySelectorAll('.search-result'));
 
     } catch (err) {
-      container.innerHTML = '<div class="search-empty">Error: ' + err + '</div>';
+      container.innerHTML = '<div class="search-empty">Error: ' + Util.escapeHtml(err) + '</div>';
     }
   },
 
   _highlightText(text, query) {
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp('(' + escaped + ')', 'gi');
-    return text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(re, '<mark>$1</mark>');
+    // Resaltar sobre el texto crudo y escapar cada fragmento: escapar primero
+    // permitia que la busqueda partiera entidades como &amp;lt;.
+    return String(text)
+      .split(re)
+      .map((part, i) => (i % 2 ? '<mark>' + Util.escapeHtml(part) + '</mark>' : Util.escapeHtml(part)))
+      .join('');
   },
 
   _highlightSearchResult(items) {

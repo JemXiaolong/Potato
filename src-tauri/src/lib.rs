@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read as IoRead};
+use std::sync::LazyLock;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -22,13 +23,7 @@ pub struct FileEntry {
     children: Vec<FileEntry>,
 }
 
-#[derive(Serialize, Clone)]
-pub struct WikiLink {
-    target: String,
-    display: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize)]
 struct McpServerInfo {
     name: String,
     source_path: String,
@@ -39,10 +34,133 @@ struct McpServerInfo {
     config: serde_json::Value,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize)]
 struct McpScanResult {
     servers: Vec<McpServerInfo>,
     scan_time_ms: u64,
+}
+
+// -- Helpers compartidos -----------------------------------------------------
+
+/// Captura un porcentaje (`42%` o `42.5%`) en lineas de progreso de git/curl.
+static PERCENT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+)(?:\.\d+)?%").unwrap());
+
+const CLAUDE_NOT_INSTALLED: &str =
+    "Claude Code no esta instalado. Instala con: curl -fsSL https://claude.ai/install.sh | sh";
+
+/// Ejecuta un closure bloqueante fuera del hilo async y aplana el error de join.
+async fn run_blocking<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("Task error: {e}"))?
+}
+
+/// Lee un stream de progreso (git, curl) linea por linea, separando por `\r`
+/// y `\n`. Usa un buffer y decodifica UTF-8, en lugar de leer byte a byte y
+/// convertir cada byte a `char` (lo que corrompia texto no ASCII).
+fn for_each_progress_line(reader: impl IoRead, mut f: impl FnMut(&str)) {
+    for chunk in BufReader::new(reader).split(b'\r').map_while(Result::ok) {
+        for line in chunk.split(|&b| b == b'\n') {
+            if !line.is_empty() {
+                f(&String::from_utf8_lossy(line));
+            }
+        }
+    }
+}
+
+/// Primer porcentaje encontrado en la linea, si existe.
+fn parse_percent(line: &str) -> Option<u32> {
+    PERCENT_RE.captures(line).and_then(|c| c[1].parse().ok())
+}
+
+/// Tiempo de modificacion en milisegundos desde epoch, 0 si no esta disponible.
+fn mtime_ms(meta: &fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// Indica si la salida de git corresponde a un fallo de autenticacion.
+fn is_git_auth_error(stderr: &str) -> bool {
+    stderr.contains("Authentication failed")
+        || stderr.contains("Permission denied")
+        || stderr.contains("terminal prompts disabled")
+        || stderr.contains("could not read Username")
+}
+
+/// Ejecuta git en el repositorio y devuelve stdout recortado (vacio si falla).
+fn git_stdout(repo_path: &str, args: &[&str]) -> String {
+    git_cmd(repo_path)
+        .args(args)
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+/// Descripcion corta de un archivo Markdown de agente/comando: el campo
+/// `description:` del frontmatter YAML o, en su defecto, la primera linea util.
+fn md_description(content: &str) -> String {
+    fn first_text_line<'a>(mut lines: impl Iterator<Item = &'a str>) -> Option<String> {
+        lines
+            .find(|l| {
+                let t = l.trim();
+                !t.is_empty() && !t.starts_with('#')
+            })
+            .map(|l| l.trim().chars().take(120).collect())
+    }
+
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.first().map(|l| l.trim()) != Some("---") {
+        return first_text_line(lines.into_iter()).unwrap_or_default();
+    }
+    let end = lines.iter().skip(1).position(|l| l.trim() == "---");
+    if let Some(end_idx) = end {
+        for line in &lines[1..=end_idx] {
+            if let Some(desc) = line.strip_prefix("description:") {
+                let d = desc.trim().trim_matches('"').trim_matches('\'');
+                if !d.is_empty() {
+                    return d.chars().take(120).collect();
+                }
+            }
+        }
+    }
+    let skip = end.map_or(1, |i| i + 2);
+    first_text_line(lines.into_iter().skip(skip)).unwrap_or_default()
+}
+
+/// Borra el archivo al salir de alcance (incluido el camino de error con `?`).
+struct TempFileGuard(PathBuf);
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// Escribe un archivo legible solo por el usuario actual (0600 en Unix).
+fn write_private_file(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)?.write_all(contents.as_bytes())
+}
+
+/// Rechaza nombres que podrian escapar del directorio esperado.
+fn validate_plain_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.contains(['/', '\\']) || name.starts_with('.') {
+        return Err(format!("Nombre invalido: {name}"));
+    }
+    Ok(())
 }
 
 // -- Comandos: Vault ---------------------------------------------------------
@@ -55,7 +173,7 @@ fn open_vault() -> Option<String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_vault(path: String) -> Result<Vec<FileEntry>, String> {
     let root = PathBuf::from(&path);
     if !root.is_dir() {
@@ -73,15 +191,19 @@ fn build_tree(dir: &PathBuf) -> Vec<FileEntry> {
     let mut files = Vec::new();
 
     for entry in read_dir.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
+        let name = entry.file_name().to_string_lossy().into_owned();
 
         // Ignorar archivos/dirs ocultos
         if name.starts_with('.') {
             continue;
         }
 
-        if path.is_dir() {
+        // file_type() no sigue symlinks: evita recursion infinita con enlaces
+        // a directorios padre y ahorra un stat por entrada.
+        let Ok(file_type) = entry.file_type() else { continue };
+        let path = entry.path();
+
+        if file_type.is_dir() {
             let children = build_tree(&path);
             // Roll up the newest descendant so folder ordering reflects activity
             // inside it, not just when the directory entry itself changed.
@@ -118,23 +240,17 @@ fn build_tree(dir: &PathBuf) -> Vec<FileEntry> {
 
 /// Modification time of a directory entry in milliseconds, 0 when unavailable.
 fn entry_mtime(entry: &fs::DirEntry) -> u64 {
-    entry
-        .metadata()
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    entry.metadata().map_or(0, |m| mtime_ms(&m))
 }
 
 // -- Comandos: Notas ---------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_note(path: String) -> Result<String, String> {
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_note(path: String, content: String) -> Result<(), String> {
     fs::write(&path, &content).map_err(|e| e.to_string())
 }
@@ -173,40 +289,26 @@ struct NoteStat {
 #[tauri::command]
 fn note_stat(path: String) -> Result<NoteStat, String> {
     let meta = fs::metadata(&path).map_err(|e| e.to_string())?;
-    let mtime = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
     Ok(NoteStat {
         size: meta.len(),
-        mtime,
+        mtime: mtime_ms(&meta),
     })
 }
 
 #[tauri::command]
 fn create_note(vault_path: String, name: String) -> Result<String, String> {
-    let file_path = PathBuf::from(&vault_path).join(format!("{}.md", name));
-    let content = format!("# {}\n\n", name);
-    fs::write(&file_path, &content).map_err(|e| e.to_string())?;
-    Ok(file_path.to_string_lossy().to_string())
-}
-
-// -- Comandos: Wikilinks -----------------------------------------------------
-
-#[tauri::command]
-fn parse_wikilinks(content: String) -> Vec<WikiLink> {
-    let re = Regex::new(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]").unwrap();
-    re.captures_iter(&content)
-        .map(|cap| WikiLink {
-            target: cap[1].to_string(),
-            display: cap
-                .get(2)
-                .map(|m| m.as_str().to_string())
-                .unwrap_or_else(|| cap[1].to_string()),
-        })
-        .collect()
+    use std::io::Write;
+    validate_plain_name(&name)?;
+    let file_path = PathBuf::from(&vault_path).join(format!("{name}.md"));
+    // create_new evita sobrescribir en silencio una nota existente.
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&file_path)
+        .map_err(|e| e.to_string())?;
+    file.write_all(format!("# {name}\n\n").as_bytes())
+        .map_err(|e| e.to_string())?;
+    Ok(file_path.to_string_lossy().into_owned())
 }
 
 // -- Comandos: Git -----------------------------------------------------------
@@ -222,11 +324,11 @@ pub struct GitStatus {
 /// Helper: crea un Command de git que no se cuelga esperando autenticacion.
 /// GIT_TERMINAL_PROMPT=0 evita prompts HTTPS.
 /// SSH BatchMode=yes evita prompts de passphrase SSH.
+/// LC_ALL=C fuerza mensajes en ingles: el parseo de progreso y errores busca
+/// cadenas en ingles y fallaba en sistemas con locale en espanol.
 fn git_cmd(repo_path: &str) -> std::process::Command {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = git_cmd_bare();
     cmd.args(["-C", repo_path]);
-    cmd.env("GIT_TERMINAL_PROMPT", "0");
-    cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new");
     cmd
 }
 
@@ -235,82 +337,68 @@ fn git_cmd_bare() -> std::process::Command {
     let mut cmd = std::process::Command::new("git");
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new");
+    cmd.env("LC_ALL", "C");
     cmd
 }
 
+/// Evento de progreso compartido por clonado (git) y descarga de updates.
 #[derive(Serialize, Clone)]
-struct GitProgress {
+struct Progress {
     phase: String,
     percent: u32,
 }
 
 #[tauri::command]
 async fn git_clone(app: tauri::AppHandle, url: String, path: String) -> Result<String, String> {
-    let app_handle = app.clone();
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
+        // "--" impide que una URL que empiece con "-" se interprete como opcion
+        // (p. ej. --upload-pack=<cmd>).
         let mut child = git_cmd_bare()
-            .args(["clone", "--progress", &url, &path])
+            .args(["clone", "--progress", "--", &url, &path])
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("No se pudo ejecutar git: {}", e))?;
+            .map_err(|e| format!("No se pudo ejecutar git: {e}"))?;
 
-        // Read stderr byte by byte (git uses \r for progress)
+        // git usa \r para actualizar la linea de progreso
         if let Some(stderr) = child.stderr.take() {
-            let re = Regex::new(r"(\d+)%").unwrap();
-            let mut line_buf = String::new();
-
-            for byte in stderr.bytes().flatten() {
-                if byte == b'\r' || byte == b'\n' {
-                    if !line_buf.is_empty() {
-                        // Parse phase and percent
-                        let phase = if line_buf.contains("Counting") {
-                            "Contando objetos"
-                        } else if line_buf.contains("Compressing") {
-                            "Comprimiendo"
-                        } else if line_buf.contains("Receiving") {
-                            "Recibiendo objetos"
-                        } else if line_buf.contains("Resolving") {
-                            "Resolviendo deltas"
-                        } else if line_buf.contains("Cloning") {
-                            "Conectando"
-                        } else {
-                            ""
-                        };
-
-                        if !phase.is_empty() {
-                            let percent = re.captures(&line_buf)
-                                .and_then(|c| c[1].parse::<u32>().ok())
-                                .unwrap_or(0);
-
-                            // Map phases to overall progress
-                            let overall = match phase {
-                                "Conectando" => 2,
-                                "Contando objetos" => 5 + percent / 10,
-                                "Comprimiendo" => 15 + percent / 5,
-                                "Recibiendo objetos" => 35 + (percent * 50 / 100),
-                                "Resolviendo deltas" => 85 + (percent * 15 / 100),
-                                _ => percent,
-                            };
-
-                            let _ = app_handle.emit("git-progress", GitProgress {
-                                phase: phase.to_string(),
-                                percent: overall.min(100),
-                            });
-                        }
-
-                        line_buf.clear();
-                    }
+            for_each_progress_line(stderr, |line| {
+                let phase = if line.contains("Counting") {
+                    "Contando objetos"
+                } else if line.contains("Compressing") {
+                    "Comprimiendo"
+                } else if line.contains("Receiving") {
+                    "Recibiendo objetos"
+                } else if line.contains("Resolving") {
+                    "Resolviendo deltas"
+                } else if line.contains("Cloning") {
+                    "Conectando"
                 } else {
-                    line_buf.push(byte as char);
-                }
-            }
+                    return;
+                };
+
+                let percent = parse_percent(line).unwrap_or(0);
+
+                // Mapear fases a progreso global
+                let overall = match phase {
+                    "Conectando" => 2,
+                    "Contando objetos" => 5 + percent / 10,
+                    "Comprimiendo" => 15 + percent / 5,
+                    "Recibiendo objetos" => 35 + percent / 2,
+                    "Resolviendo deltas" => 85 + percent * 15 / 100,
+                    _ => percent,
+                };
+
+                let _ = app.emit("git-progress", Progress {
+                    phase: phase.to_string(),
+                    percent: overall.min(100),
+                });
+            });
         }
 
-        let status = child.wait().map_err(|e| format!("Error esperando git: {}", e))?;
+        let status = child.wait().map_err(|e| format!("Error esperando git: {e}"))?;
 
-        // Emit 100% done
-        let _ = app_handle.emit("git-progress", GitProgress {
+        let _ = app.emit("git-progress", Progress {
             phase: "Completado".to_string(),
             percent: 100,
         });
@@ -322,15 +410,14 @@ async fn git_clone(app: tauri::AppHandle, url: String, path: String) -> Result<S
         }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
 async fn git_status(path: String) -> Result<GitStatus, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         // Check if it's a git repo
-        let is_repo = std::process::Command::new("git")
-            .args(["-C", &path, "rev-parse", "--is-inside-work-tree"])
+        let is_repo = git_cmd(&path)
+            .args(["rev-parse", "--is-inside-work-tree"])
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
@@ -344,20 +431,11 @@ async fn git_status(path: String) -> Result<GitStatus, String> {
             });
         }
 
-        let branch = std::process::Command::new("git")
-            .args(["-C", &path, "branch", "--show-current"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
+        let branch = git_stdout(&path, &["branch", "--show-current"]);
+        let remote = git_stdout(&path, &["remote", "get-url", "origin"]);
 
-        let remote = std::process::Command::new("git")
-            .args(["-C", &path, "remote", "get-url", "origin"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
-
-        let has_changes = std::process::Command::new("git")
-            .args(["-C", &path, "status", "--porcelain"])
+        let has_changes = git_cmd(&path)
+            .args(["status", "--porcelain"])
             .output()
             .map(|o| !o.stdout.is_empty())
             .unwrap_or(false);
@@ -370,7 +448,6 @@ async fn git_status(path: String) -> Result<GitStatus, String> {
         })
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[derive(Serialize, Clone)]
@@ -382,7 +459,7 @@ pub struct GitFileChange {
 
 #[tauri::command]
 async fn git_pull(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         let pull = git_cmd(&path)
             .args(["pull", "--rebase", "--autostash"])
             .output()
@@ -399,11 +476,7 @@ async fn git_pull(path: String) -> Result<String, String> {
             let stderr = String::from_utf8_lossy(&pull.stderr).to_string();
             if stderr.contains("no tracking information") || stderr.contains("no such ref") {
                 Ok("no_remote_branch".to_string())
-            } else if stderr.contains("Authentication failed")
-                || stderr.contains("Permission denied")
-                || stderr.contains("terminal prompts disabled")
-                || stderr.contains("could not read Username")
-            {
+            } else if is_git_auth_error(&stderr) {
                 Err("auth_error".to_string())
             } else {
                 Err(stderr)
@@ -411,7 +484,6 @@ async fn git_pull(path: String) -> Result<String, String> {
         }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[derive(Serialize)]
@@ -500,7 +572,7 @@ fn encode_url_path(path: &str) -> String {
 /// Build a shareable web link for a note inside a git-backed vault.
 #[tauri::command]
 async fn git_share_link(vault_path: String, note_path: String) -> Result<ShareLink, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         // Note path relative to the vault root (this is the fallback payload
         // when the vault has no usable remote).
         let relative_path = note_path
@@ -521,30 +593,18 @@ async fn git_share_link(vault_path: String, note_path: String) -> Result<ShareLi
             return Ok(empty);
         }
 
-        let remote = git_cmd(&vault_path)
-            .args(["remote", "get-url", "origin"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
+        let remote = git_stdout(&vault_path, &["remote", "get-url", "origin"]);
 
         let (base, provider) = remote_to_web_base(&remote);
         if base.is_empty() {
             return Ok(ShareLink { provider, ..empty });
         }
 
-        let branch = git_cmd(&vault_path)
-            .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .unwrap_or_default();
+        let branch = git_stdout(&vault_path, &["rev-parse", "--abbrev-ref", "HEAD"]);
 
         // Detached HEAD: link the commit sha so the URL still resolves.
         let git_ref = if branch.is_empty() || branch == "HEAD" {
-            git_cmd(&vault_path)
-                .args(["rev-parse", "HEAD"])
-                .output()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                .unwrap_or_default()
+            git_stdout(&vault_path, &["rev-parse", "HEAD"])
         } else {
             branch.clone()
         };
@@ -608,7 +668,6 @@ async fn git_share_link(vault_path: String, note_path: String) -> Result<ShareLi
         })
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[cfg(test)]
@@ -668,11 +727,13 @@ mod share_link_tests {
 
 #[tauri::command]
 async fn git_changed_files(path: String) -> Result<Vec<GitFileChange>, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         let output = git_cmd(&path)
-            .args(["status", "--porcelain"])
+            // core.quotePath=false: no escapar rutas con acentos (año.md llegaba
+            // como "a\303\261o.md" y luego fallaba el git add).
+            .args(["-c", "core.quotePath=false", "status", "--porcelain"])
             .output()
-            .map_err(|e| format!("Error en status: {}", e))?;
+            .map_err(|e| format!("Error en status: {e}"))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut files = Vec::new();
@@ -682,7 +743,10 @@ async fn git_changed_files(path: String) -> Result<Vec<GitFileChange>, String> {
                 continue;
             }
             let code = line[..2].trim().to_string();
-            let file_path = line[3..].trim_start_matches("-> ").to_string();
+            // En renombres git imprime "viejo -> nuevo"; interesa la ruta nueva.
+            let raw = &line[3..];
+            let raw = raw.rsplit_once(" -> ").map_or(raw, |(_, new)| new);
+            let file_path = raw.trim_matches('"').to_string();
 
             let (status, status_code) = match code.as_str() {
                 "M" | "MM" => ("modified".to_string(), "M".to_string()),
@@ -704,12 +768,11 @@ async fn git_changed_files(path: String) -> Result<Vec<GitFileChange>, String> {
         Ok(files)
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
 async fn git_stage_files(path: String, files: Vec<String>) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         let mut args = vec!["add", "--"];
         let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
         args.extend(file_refs);
@@ -726,12 +789,11 @@ async fn git_stage_files(path: String, files: Vec<String>) -> Result<(), String>
         }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
 async fn git_commit(path: String, message: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         let output = git_cmd(&path)
             .args(["commit", "-m", &message])
             .output()
@@ -744,12 +806,11 @@ async fn git_commit(path: String, message: String) -> Result<String, String> {
         }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
 async fn git_push(path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         let output = git_cmd(&path)
             .args(["push", "-u", "origin", "HEAD"])
             .output()
@@ -759,11 +820,7 @@ async fn git_push(path: String) -> Result<String, String> {
             Ok("Push OK".to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            if stderr.contains("Authentication failed")
-                || stderr.contains("Permission denied")
-                || stderr.contains("terminal prompts disabled")
-                || stderr.contains("could not read Username")
-            {
+            if is_git_auth_error(&stderr) {
                 Err("auth_error".to_string())
             } else {
                 Err(stderr)
@@ -771,7 +828,6 @@ async fn git_push(path: String) -> Result<String, String> {
         }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
@@ -910,7 +966,7 @@ pub struct SearchResult {
 
 #[tauri::command]
 async fn search_vault(path: String, query: String) -> Result<Vec<SearchResult>, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
         search_dir(&PathBuf::from(&path), &query_lower, &mut results);
@@ -925,29 +981,29 @@ async fn search_vault(path: String, query: String) -> Result<Vec<SearchResult>, 
         Ok(results)
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 fn search_dir(dir: &PathBuf, query: &str, results: &mut Vec<SearchResult>) {
     let Ok(read_dir) = fs::read_dir(dir) else { return };
 
     for entry in read_dir.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-
-        if name.starts_with('.') {
+        if entry.file_name().to_string_lossy().starts_with('.') {
             continue;
         }
 
-        if path.is_dir() {
+        let Ok(file_type) = entry.file_type() else { continue };
+        let path = entry.path();
+
+        if file_type.is_dir() {
             search_dir(&path, query, results);
         } else if path.extension().is_some_and(|e| e == "md") {
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            let path_str = path.to_string_lossy().into_owned();
 
             // Match file name
             if stem.to_lowercase().contains(query) {
                 results.push(SearchResult {
-                    path: path.to_string_lossy().to_string(),
+                    path: path_str.clone(),
                     name: stem.clone(),
                     match_type: "name".to_string(),
                     preview: String::new(),
@@ -956,22 +1012,22 @@ fn search_dir(dir: &PathBuf, query: &str, results: &mut Vec<SearchResult>) {
             }
 
             // Match content
+            // Maximo 3 coincidencias de contenido por archivo. Antes se recontaban
+            // todos los resultados acumulados en cada coincidencia (O(n^2)).
             if let Ok(content) = fs::read_to_string(&path) {
-                for (i, line_text) in content.lines().enumerate() {
-                    if line_text.to_lowercase().contains(query) {
-                        let preview = line_text.trim().chars().take(120).collect::<String>();
-                        results.push(SearchResult {
-                            path: path.to_string_lossy().to_string(),
-                            name: stem.clone(),
-                            match_type: "content".to_string(),
-                            preview,
-                            line: (i + 1) as u32,
-                        });
-                        // Max 3 content matches per file
-                        if results.iter().filter(|r| r.path == path.to_string_lossy().to_string() && r.match_type == "content").count() >= 3 {
-                            break;
-                        }
-                    }
+                let matches = content
+                    .lines()
+                    .enumerate()
+                    .filter(|(_, l)| l.to_lowercase().contains(query))
+                    .take(3);
+                for (i, line_text) in matches {
+                    results.push(SearchResult {
+                        path: path_str.clone(),
+                        name: stem.clone(),
+                        match_type: "content".to_string(),
+                        preview: line_text.trim().chars().take(120).collect(),
+                        line: u32::try_from(i + 1).unwrap_or(u32::MAX),
+                    });
                 }
             }
         }
@@ -1012,7 +1068,7 @@ fn load_session() -> Option<Session> {
 
 // -- Comandos: Archivos ------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 fn move_file(from: String, to_dir: String) -> Result<String, String> {
     let from_path = PathBuf::from(&from);
 
@@ -1058,18 +1114,16 @@ fn open_in_explorer(path: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn scan_mcp_servers() -> Result<McpScanResult, String> {
-    tokio::task::spawn_blocking(|| {
+    run_blocking(|| {
         let home = std::env::var("HOME").unwrap_or_default();
         if home.is_empty() {
             return Ok(McpScanResult { servers: vec![], scan_time_ms: 0 });
         }
 
         let start = std::time::Instant::now();
-        let exclude_dirs: std::collections::HashSet<&str> = [
-            ".git", "node_modules", ".cache", ".local", ".cargo", "target",
-            ".claude", ".npm", ".nvm", ".rustup", "__pycache__", "venv",
-            "dist", "build", "snap", ".venv", ".tox", ".mypy_cache",
-        ].iter().cloned().collect();
+        const EXCLUDE_DIRS: &[&str] = &[
+            "node_modules", "target", "__pycache__", "venv", "dist", "build", "snap",
+        ];
 
         let mut servers = Vec::new();
 
@@ -1082,9 +1136,8 @@ async fn scan_mcp_servers() -> Result<McpScanResult, String> {
                     let name = e.file_name().to_string_lossy();
                     // Permitir el home dir raiz
                     if e.depth() == 0 { return true; }
-                    // Excluir directorios ocultos (excepto .mcp.json que es archivo)
-                    if name.starts_with('.') && name != ".mcp.json" { return false; }
-                    !exclude_dirs.contains(name.as_ref())
+                    // Excluir directorios ocultos (.git, .cache, .venv, ...)
+                    !name.starts_with('.') && !EXCLUDE_DIRS.contains(&name.as_ref())
                 } else {
                     true
                 }
@@ -1165,7 +1218,6 @@ async fn scan_mcp_servers() -> Result<McpScanResult, String> {
         Ok(McpScanResult { servers, scan_time_ms: elapsed })
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 // -- Claude: Listar agentes --------------------------------------------------
@@ -1176,7 +1228,7 @@ pub struct AgentInfo {
     description: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_claude_agents(path: String) -> Vec<AgentInfo> {
     let agents_dir = PathBuf::from(&path).join(".claude").join("agents");
     if !agents_dir.is_dir() {
@@ -1199,37 +1251,7 @@ fn list_claude_agents(path: String) -> Vec<AgentInfo> {
 
             // Leer descripcion del frontmatter YAML o primera linea util
             let description = fs::read_to_string(&file_path)
-                .ok()
-                .and_then(|content| {
-                    let lines: Vec<&str> = content.lines().collect();
-                    // Si tiene frontmatter YAML (---), buscar campo description
-                    if lines.first().map(|l| l.trim()) == Some("---") {
-                        let end = lines.iter().skip(1).position(|l| l.trim() == "---");
-                        if let Some(end_idx) = end {
-                            // Buscar "description:" dentro del frontmatter
-                            for line in &lines[1..=end_idx] {
-                                if let Some(desc) = line.strip_prefix("description:") {
-                                    let d = desc.trim().trim_matches('"').trim_matches('\'');
-                                    if !d.is_empty() {
-                                        return Some(d.chars().take(120).collect::<String>());
-                                    }
-                                }
-                            }
-                        }
-                        // Frontmatter sin description: buscar primera linea despues
-                        let skip = end.map(|i| i + 2).unwrap_or(1);
-                        lines.iter().skip(skip).find(|l| {
-                            let t = l.trim();
-                            !t.is_empty() && !t.starts_with('#')
-                        }).map(|l| l.trim().chars().take(120).collect::<String>())
-                    } else {
-                        // Sin frontmatter: primera linea no vacia ni titulo
-                        lines.iter().find(|l| {
-                            let t = l.trim();
-                            !t.is_empty() && !t.starts_with('#')
-                        }).map(|l| l.trim().chars().take(120).collect::<String>())
-                    }
-                })
+                .map(|c| md_description(&c))
                 .unwrap_or_default();
 
             agents.push(AgentInfo { name, description });
@@ -1275,24 +1297,22 @@ pub struct StreamChunk {
 
 // -- Claude: Process registry ------------------------------------------------
 
-struct ProcessEntry {
-    pid: u32,
-}
-
-static CLAUDE_REGISTRY: Mutex<Option<HashMap<String, ProcessEntry>>> = Mutex::new(None);
+/// Id de sesion (frontend) -> PID del proceso `claude`.
+static CLAUDE_REGISTRY: LazyLock<Mutex<HashMap<String, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn claude_registry<F, R>(f: F) -> R
 where
-    F: FnOnce(&mut HashMap<String, ProcessEntry>) -> R,
+    F: FnOnce(&mut HashMap<String, u32>) -> R,
 {
-    let mut guard = CLAUDE_REGISTRY.lock().unwrap();
-    let map = guard.get_or_insert_with(HashMap::new);
-    f(map)
+    // Un panic con el lock tomado no debe inutilizar todas las sesiones.
+    let mut guard = CLAUDE_REGISTRY.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    f(&mut guard)
 }
 
 fn claude_register(id: &str, pid: u32) {
     claude_registry(|map| {
-        map.insert(id.to_string(), ProcessEntry { pid });
+        map.insert(id.to_string(), pid);
     });
 }
 
@@ -1303,7 +1323,7 @@ fn claude_unregister(id: &str) {
 }
 
 fn claude_stop(id: &str) -> Result<(), String> {
-    let pid = claude_registry(|map| map.remove(id).map(|e| e.pid));
+    let pid = claude_registry(|map| map.remove(id));
     match pid {
         Some(p) => {
             let _ = std::process::Command::new("kill")
@@ -1317,7 +1337,7 @@ fn claude_stop(id: &str) -> Result<(), String> {
 
 // -- Claude: Listar comandos -------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_claude_commands(path: String) -> Vec<AgentInfo> {
     // Aceptar tanto el directorio raiz como la ruta completa a .claude/commands
     let base = PathBuf::from(&path);
@@ -1349,33 +1369,7 @@ fn list_claude_commands(path: String) -> Vec<AgentInfo> {
                 .to_string();
 
             let description = fs::read_to_string(&resolved)
-                .ok()
-                .and_then(|content| {
-                    let lines: Vec<&str> = content.lines().collect();
-                    if lines.first().map(|l| l.trim()) == Some("---") {
-                        let end = lines.iter().skip(1).position(|l| l.trim() == "---");
-                        if let Some(end_idx) = end {
-                            for line in &lines[1..=end_idx] {
-                                if let Some(desc) = line.strip_prefix("description:") {
-                                    let d = desc.trim().trim_matches('"').trim_matches('\'');
-                                    if !d.is_empty() {
-                                        return Some(d.chars().take(120).collect::<String>());
-                                    }
-                                }
-                            }
-                        }
-                        let skip = end.map(|i| i + 2).unwrap_or(1);
-                        lines.iter().skip(skip).find(|l| {
-                            let t = l.trim();
-                            !t.is_empty() && !t.starts_with('#')
-                        }).map(|l| l.trim().chars().take(120).collect::<String>())
-                    } else {
-                        lines.iter().find(|l| {
-                            let t = l.trim();
-                            !t.is_empty() && !t.starts_with('#')
-                        }).map(|l| l.trim().chars().take(120).collect::<String>())
-                    }
-                })
+                .map(|c| md_description(&c))
                 .unwrap_or_default();
 
             commands.push(AgentInfo { name, description });
@@ -1386,7 +1380,7 @@ fn list_claude_commands(path: String) -> Vec<AgentInfo> {
     commands
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_claude_command(path: String, command: String) -> Result<String, String> {
     let base = PathBuf::from(&path);
     let commands_dir = if base.ends_with(".claude/commands") || base.ends_with(".claude\\commands") {
@@ -1396,7 +1390,8 @@ fn read_claude_command(path: String, command: String) -> Result<String, String> 
     } else {
         base.join(".claude").join("commands")
     };
-    let cmd_file = commands_dir.join(format!("{}.md", command));
+    validate_plain_name(&command)?;
+    let cmd_file = commands_dir.join(format!("{command}.md"));
     let resolved = fs::canonicalize(&cmd_file).map_err(|e| e.to_string())?;
     fs::read_to_string(&resolved).map_err(|e| e.to_string())
 }
@@ -1484,7 +1479,7 @@ fn resolve_claude_binary() -> Option<String> {
                 let p = entry.path();
                 if p.is_file() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if best.as_ref().map_or(true, |(b, _)| name > *b) {
+                    if best.as_ref().is_none_or(|(b, _)| name > *b) {
                         best = Some((name, p.to_string_lossy().to_string()));
                     }
                 }
@@ -1500,42 +1495,36 @@ fn resolve_claude_binary() -> Option<String> {
 
 /// Devuelve la ruta al binario de claude, cacheada tras la primera resolucion.
 fn get_claude_binary() -> Result<String, String> {
-    let mut guard = CLAUDE_BINARY.lock().unwrap();
-    if let Some(ref path) = *guard {
-        return Ok(path.clone());
+    let lock = || CLAUDE_BINARY.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(path) = lock().clone() {
+        return Ok(path);
     }
 
-    // Resolver ruta completa (siempre usar ruta absoluta para evitar problemas de PATH)
-    // Primero intentar resolve_claude_binary que busca la ruta real
-    match resolve_claude_binary() {
-        Some(path) => {
-            *guard = Some(path.clone());
-            Ok(path)
-        }
-        None => Err("Claude Code no esta instalado. Instala con: curl -fsSL https://claude.ai/install.sh | sh".to_string()),
-    }
+    // La resolucion lanza login shells (lenta): no mantener el lock mientras tanto.
+    let path = resolve_claude_binary().ok_or_else(|| CLAUDE_NOT_INSTALLED.to_string())?;
+    *lock() = Some(path.clone());
+    Ok(path)
 }
 
 // -- Claude: Comandos --------------------------------------------------------
 
-#[tauri::command]
+#[tauri::command(async)]
 fn check_claude() -> Result<String, String> {
     let binary = get_claude_binary()?;
     let output = std::process::Command::new(&binary)
         .arg("--version")
         .output()
-        .map_err(|_| {
-            "Claude Code no esta instalado. Instala con: curl -fsSL https://claude.ai/install.sh | sh"
-                .to_string()
-        })?;
+        .map_err(|_| CLAUDE_NOT_INSTALLED.to_string())?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        Err("Claude Code no esta instalado. Instala con: curl -fsSL https://claude.ai/install.sh | sh".to_string())
+        Err(CLAUDE_NOT_INSTALLED.to_string())
     }
 }
 
+// Cada argumento corresponde a un campo que envia el frontend en invoke().
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn send_claude_message(
     message: String,
@@ -1548,7 +1537,11 @@ async fn send_claude_message(
     mcp_config_json: Option<String>,
     on_event: Channel<StreamChunk>,
 ) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
+    // process_id se usa en el nombre del archivo temporal: evitar "../" etc.
+    if !process_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("process_id invalido".to_string());
+    }
+    run_blocking(move || {
         let mut args: Vec<String> = vec![
             "--print".to_string(),
             "--verbose".to_string(),
@@ -1560,12 +1553,15 @@ async fn send_claude_message(
         // MCP config: escribir a archivo temporal y pasar la ruta
         // Colocar ANTES de --dangerously-skip-permissions para que ese flag
         // termine la coleccion variadic de --mcp-config
-        let _mcp_temp_file: Option<std::path::PathBuf> = if let Some(ref mcp_json) = mcp_config_json {
-            let tmp_path = std::env::temp_dir().join(format!("potato-mcp-{}.json", process_id));
-            fs::write(&tmp_path, mcp_json).map_err(|e| format!("Error escribiendo MCP config: {}", e))?;
+        // El archivo puede contener tokens: se crea con permisos 0600 y se borra
+        // al salir de la funcion (TempFileGuard), incluso si algo falla despues.
+        let _mcp_temp_file: Option<TempFileGuard> = if let Some(ref mcp_json) = mcp_config_json {
+            let tmp_path = std::env::temp_dir().join(format!("potato-mcp-{process_id}.json"));
+            write_private_file(&tmp_path, mcp_json)
+                .map_err(|e| format!("Error escribiendo MCP config: {e}"))?;
             args.push("--mcp-config".to_string());
-            args.push(tmp_path.to_string_lossy().to_string());
-            Some(tmp_path)
+            args.push(tmp_path.to_string_lossy().into_owned());
+            Some(TempFileGuard(tmp_path))
         } else {
             None
         };
@@ -1622,7 +1618,7 @@ async fn send_claude_message(
             .map_err(|e| {
                 let bin_exists = std::path::Path::new(&binary).exists();
                 let dir_info = working_dir.as_deref().unwrap_or("(none)");
-                let dir_exists = working_dir.as_ref().map_or(true, |d| std::path::Path::new(d).is_dir());
+                let dir_exists = working_dir.as_ref().is_none_or(|d| std::path::Path::new(d).is_dir());
                 format!(
                     "No se pudo ejecutar claude: {} | binary={} (exists={}) | workdir={} (exists={})",
                     e, binary, bin_exists, dir_info, dir_exists
@@ -1928,9 +1924,7 @@ async fn send_claude_message(
         let stderr_output = stderr_thread.join().unwrap_or_default();
 
         // Limpiar archivo temporal MCP
-        if let Some(ref tmp) = _mcp_temp_file {
-            let _ = fs::remove_file(tmp);
-        }
+        drop(_mcp_temp_file);
 
         claude_unregister(&process_id);
 
@@ -1958,7 +1952,6 @@ async fn send_claude_message(
         }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
@@ -1968,98 +1961,103 @@ fn stop_claude(process_id: String) -> Result<(), String> {
 
 // -- Update: Auto-update commands --------------------------------------------
 
-#[derive(Serialize, Clone)]
-struct UpdateProgress {
-    phase: String,
-    percent: u32,
+/// Ruta fija del paquete descargado, dentro del cache del usuario (0700).
+/// Antes era /tmp/potato-update.deb: compartido entre usuarios, cualquiera
+/// podia reemplazarlo entre la descarga y el `pkexec dpkg -i`.
+fn update_package_path() -> Result<PathBuf, String> {
+    let dir = dirs::cache_dir()
+        .ok_or("No se encontro el directorio de cache")?
+        .join("potato");
+    fs::create_dir_all(&dir).map_err(|e| format!("No se pudo crear {}: {e}", dir.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+    }
+    Ok(dir.join("potato-update.deb"))
 }
 
 #[tauri::command]
 async fn download_update(app: tauri::AppHandle, url: String) -> Result<String, String> {
-    let app_handle = app.clone();
-    tokio::task::spawn_blocking(move || {
-        let dest = "/tmp/potato-update.deb";
-
-        // Remove previous download if exists
-        let _ = fs::remove_file(dest);
+    if !url.starts_with("https://") {
+        return Err("URL de actualizacion invalida.".to_string());
+    }
+    run_blocking(move || {
+        let dest = update_package_path()?;
+        let _ = fs::remove_file(&dest);
 
         let mut child = std::process::Command::new("curl")
-            .args(["-L", "-f", "-o", dest, "--progress-bar", &url])
+            .args(["-L", "-f", "--progress-bar", "-o"])
+            .arg(&dest)
+            .args(["--", &url])
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("No se pudo ejecutar curl: {}", e))?;
+            .map_err(|e| format!("No se pudo ejecutar curl: {e}"))?;
 
-        // Parse stderr byte by byte for progress (curl uses \r for progress bar)
+        // curl usa \r para su barra de progreso
         if let Some(stderr) = child.stderr.take() {
-            let re = Regex::new(r"(\d+)\.?\d*%").unwrap();
-            let mut line_buf = String::new();
             let mut last_emitted: u32 = 0;
-
-            for byte in stderr.bytes().flatten() {
-                if byte == b'\r' || byte == b'\n' {
-                    if !line_buf.is_empty() {
-                        if let Some(caps) = re.captures(&line_buf) {
-                            if let Ok(pct) = caps[1].parse::<u32>() {
-                                let pct = pct.min(100);
-                                if pct >= last_emitted + 2 || pct == 100 {
-                                    last_emitted = pct;
-                                    let _ = app_handle.emit("update-progress", UpdateProgress {
-                                        phase: "Descargando".to_string(),
-                                        percent: pct,
-                                    });
-                                }
-                            }
-                        }
-                        line_buf.clear();
+            for_each_progress_line(stderr, |line| {
+                if let Some(pct) = parse_percent(line).map(|p| p.min(100)) {
+                    if pct >= last_emitted + 2 || pct == 100 {
+                        last_emitted = pct;
+                        let _ = app.emit("update-progress", Progress {
+                            phase: "Descargando".to_string(),
+                            percent: pct,
+                        });
                     }
-                } else {
-                    line_buf.push(byte as char);
                 }
-            }
+            });
         }
 
-        let status = child.wait().map_err(|e| format!("Error esperando curl: {}", e))?;
+        let status = child.wait().map_err(|e| format!("Error esperando curl: {e}"))?;
 
-        if status.success() && PathBuf::from(dest).exists() {
-            Ok(dest.to_string())
+        if status.success() && dest.exists() {
+            Ok(dest.to_string_lossy().into_owned())
         } else {
-            let _ = fs::remove_file(dest);
+            let _ = fs::remove_file(&dest);
             Err("Error al descargar la actualizacion. Verifica tu conexion a internet.".to_string())
         }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
+/// Instala el paquete descargado por `download_update`. El parametro `path` se
+/// conserva por compatibilidad con el frontend, pero solo se acepta la ruta
+/// fija del cache: no se instala como root un archivo arbitrario.
 #[tauri::command]
 async fn install_update(path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        if !PathBuf::from(&path).exists() {
+    run_blocking(move || {
+        let expected = update_package_path()?;
+        if std::path::Path::new(&path) != expected {
+            return Err("Ruta de actualizacion no permitida.".to_string());
+        }
+        if !expected.exists() {
             return Err("Archivo de actualizacion no encontrado.".to_string());
         }
 
         let output = std::process::Command::new("pkexec")
-            .args(["dpkg", "-i", &path])
+            .args(["dpkg", "-i"])
+            .arg(&expected)
             .output()
-            .map_err(|e| format!("No se pudo ejecutar pkexec: {}", e))?;
+            .map_err(|e| format!("No se pudo ejecutar pkexec: {e}"))?;
 
-        // Clean up temp file regardless of result
-        let _ = fs::remove_file(&path);
+        // Limpiar el paquete sin importar el resultado
+        let _ = fs::remove_file(&expected);
 
         if output.status.success() {
             Ok(())
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.contains("dismissed") || stderr.contains("Not authorized") || output.status.code() == Some(126) {
                 Err("Instalacion cancelada por el usuario.".to_string())
             } else {
-                Err(format!("Error al instalar: {}", stderr))
+                Err(format!("Error al instalar: {stderr}"))
             }
         }
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
@@ -2096,7 +2094,7 @@ pub struct RecentFile {
 
 #[tauri::command]
 async fn git_recent_files(path: String, limit: Option<usize>) -> Result<Vec<RecentFile>, String> {
-    tokio::task::spawn_blocking(move || {
+    run_blocking(move || {
         let max = limit.unwrap_or(20);
 
         let output = git_cmd(&path)
@@ -2160,7 +2158,6 @@ async fn git_recent_files(path: String, limit: Option<usize>) -> Result<Vec<Rece
         Ok(results)
     })
     .await
-    .map_err(|e| format!("Task error: {}", e))?
 }
 
 // -- App ---------------------------------------------------------------------
@@ -2176,7 +2173,6 @@ pub fn run() {
             log_frontend,
             diag_note_path,
             create_note,
-            parse_wikilinks,
             git_clone,
             git_status,
             git_pull,
@@ -2207,4 +2203,46 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error running tauri application");
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::*;
+
+    #[test]
+    fn md_description_prefers_frontmatter_field() {
+        let md = "---\nname: x\ndescription: \"Revisa PRs\"\n---\n# Titulo\nCuerpo";
+        assert_eq!(md_description(md), "Revisa PRs");
+    }
+
+    #[test]
+    fn md_description_falls_back_to_first_text_line() {
+        assert_eq!(md_description("---\nname: x\n---\n# T\n\nHola"), "Hola");
+        assert_eq!(md_description("# T\n\nPrimera linea"), "Primera linea");
+        assert_eq!(md_description(""), "");
+    }
+
+    #[test]
+    fn progress_lines_split_on_cr_and_lf_and_keep_utf8() {
+        let input = "Recibiendo 10%\rRecibiendo 20%\nAño 30%\r\n".as_bytes();
+        let mut lines = Vec::new();
+        for_each_progress_line(input, |l| lines.push(l.to_string()));
+        assert_eq!(lines, ["Recibiendo 10%", "Recibiendo 20%", "Año 30%"]);
+    }
+
+    #[test]
+    fn parse_percent_handles_decimals() {
+        assert_eq!(parse_percent("###### 42.5%"), Some(42));
+        assert_eq!(parse_percent("Receiving objects: 100% (5/5)"), Some(100));
+        assert_eq!(parse_percent("sin progreso"), None);
+    }
+
+    #[test]
+    fn validate_plain_name_rejects_traversal() {
+        assert!(validate_plain_name("nota").is_ok());
+        assert!(validate_plain_name("../etc/passwd").is_err());
+        assert!(validate_plain_name("a/b").is_err());
+        assert!(validate_plain_name(".oculto").is_err());
+        assert!(validate_plain_name("").is_err());
+    }
 }

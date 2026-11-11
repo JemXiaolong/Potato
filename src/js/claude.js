@@ -272,10 +272,6 @@ const Claude = {
     }
   },
 
-  isOpen() {
-    return this.state.panelMode !== 'closed';
-  },
-
   // -- Minimize / Maximize / History ----------------------------------------
 
   minimize() {
@@ -905,29 +901,18 @@ const Claude = {
     const content = this._streamBuffer;
 
     if (content) {
-      const html = marked.parse(content, { breaks: true });
-      body.innerHTML = html + '<span class="claude-cursor"></span>';
-      body.querySelectorAll('pre code').forEach(block => {
-        if (!block.dataset.highlighted) {
-          hljs.highlightElement(block);
-          block.dataset.highlighted = '1';
-        }
-      });
+      // El renderer global de marked (preview.js) ya resalta los bloques de
+      // codigo; volver a pasar hljs en cada tick duplicaba el trabajo.
+      body.innerHTML = Util.renderMarkdown(content) + '<span class="claude-cursor"></span>';
       // Renderizar Mermaid durante streaming
       this._renderMermaidIn(body);
     }
     this._scrollToBottom();
   },
 
-  async _renderMermaidIn(container) {
-    if (typeof mermaid === 'undefined') return;
-    const nodes = container.querySelectorAll('.mermaid:not([data-processed])');
-    if (nodes.length === 0) return;
-    try {
-      await mermaid.run({ nodes });
-    } catch (e) {
-      // Ignorar errores durante streaming (diagrama incompleto)
-    }
+  _renderMermaidIn(container) {
+    // Los errores (diagrama incompleto durante streaming) se ignoran en Util.
+    return Util.renderMermaidIn(container);
   },
 
   _finalizeStream() {
@@ -943,11 +928,7 @@ const Claude = {
     const content = this._streamBuffer;
 
     if (content) {
-      const html = marked.parse(content, { breaks: true });
-      body.innerHTML = html;
-      body.querySelectorAll('pre code').forEach(block => {
-        hljs.highlightElement(block);
-      });
+      body.innerHTML = Util.renderMarkdown(content);
       this._linkifyVaultPaths(body);
       this._renderMermaidIn(body);
     } else {
@@ -1057,57 +1038,6 @@ const Claude = {
       status: 'working',
     });
     if (this.state.graphView) this._renderGraph();
-  },
-
-  _showAgentResult(tool) {
-    const el = document.getElementById('claude-agent-' + tool.tool_id);
-    if (!el) return;
-
-    // Cambiar estado a completado
-    el.classList.add('done');
-    const pulse = el.querySelector('.claude-agent-pulse');
-    if (pulse) pulse.classList.add('done');
-    const status = el.querySelector('.claude-agent-status');
-    if (status) status.textContent = tool.is_error ? 'error' : 'listo';
-
-    // Update graph node status
-    const node = this.state.graphNodes.find(n => n.id === tool.tool_id);
-    if (node) {
-      node.status = tool.is_error ? 'error' : 'done';
-    }
-    if (this.state.graphView) this._renderGraph();
-
-    // Mostrar resultado truncado si hay
-    if (tool.result && tool.result.trim()) {
-      const lines = tool.result.split('\n');
-      const preview = lines.slice(0, 4).join('\n');
-      const suffix = lines.length > 4 ? '\n...' : '';
-
-      const resultEl = document.createElement('div');
-      resultEl.className = 'claude-agent-result';
-      resultEl.innerHTML = `<pre>${this._escapeHtml(preview + suffix)}</pre>`;
-
-      if (lines.length > 4) {
-        const toggle = document.createElement('button');
-        toggle.className = 'claude-tool-expand';
-        toggle.textContent = `Ver todo (${lines.length} lineas)`;
-        toggle.addEventListener('click', () => {
-          const pre = resultEl.querySelector('pre');
-          if (toggle.dataset.expanded === '1') {
-            pre.textContent = preview + suffix;
-            toggle.textContent = `Ver todo (${lines.length} lineas)`;
-            toggle.dataset.expanded = '0';
-          } else {
-            pre.textContent = tool.result;
-            toggle.textContent = 'Colapsar';
-            toggle.dataset.expanded = '1';
-          }
-        });
-        resultEl.appendChild(toggle);
-      }
-      el.appendChild(resultEl);
-    }
-    this._scrollToBottom();
   },
 
   // -- Tool handling ---------------------------------------------------------
@@ -1551,7 +1481,6 @@ const Claude = {
     }
 
     container.innerHTML = '';
-    const home = null; // Will replace from paths
 
     // Agrupar por source_dir
     const groups = {};
@@ -1640,7 +1569,6 @@ const Claude = {
       const query = cmdMatch[1].toLowerCase();
       const filtered = this.state.commands.filter(c => c.name.toLowerCase().includes(query));
       if (filtered.length > 0) {
-        this._acType = 'command';
         this._autocompleteShow(filtered, cmdMatch.index, '/');
         return;
       }
@@ -1659,7 +1587,6 @@ const Claude = {
       const all = [...this.state.agents, ...builtins];
       const filtered = all.filter(a => a.name.toLowerCase().includes(query));
       if (filtered.length > 0) {
-        this._acType = 'agent';
         this._autocompleteShow(filtered, agentMatch.index, '@');
         return;
       }
@@ -1720,7 +1647,7 @@ const Claude = {
   _autocompleteSelect(el) {
     const name = el.dataset.name;
     const dropdown = document.getElementById('claude-autocomplete');
-    const triggerPos = parseInt(dropdown.dataset.triggerPos || '0');
+    const triggerPos = parseInt(dropdown.dataset.triggerPos || '0', 10);
     const prefix = dropdown.dataset.prefix || '@';
     const val = this._inputEl.value;
     const pos = this._inputEl.selectionStart;
@@ -1884,11 +1811,8 @@ const Claude = {
   _addRestoredAssistantMessage(content) {
     const el = document.createElement('div');
     el.className = 'claude-msg claude-msg-assistant';
-    const html = marked.parse(content, { breaks: true });
+    const html = Util.renderMarkdown(content);
     el.innerHTML = `<div class="claude-msg-role">Claude</div><div class="claude-msg-body">${html}</div>`;
-    el.querySelectorAll('pre code').forEach(block => {
-      hljs.highlightElement(block);
-    });
     this._linkifyVaultPaths(el.querySelector('.claude-msg-body'));
     this._messagesEl.appendChild(el);
     this._scrollToBottom();
@@ -1967,7 +1891,7 @@ const Claude = {
       e.preventDefault();
       startX = e.clientX;
       const current = getComputedStyle(document.documentElement).getPropertyValue('--compact-note-w');
-      startWidth = parseInt(current) || 280;
+      startWidth = parseInt(current, 10) || 280;
 
       handle.classList.add('dragging');
       document.body.style.cursor = 'col-resize';
@@ -2006,10 +1930,7 @@ const Claude = {
   },
 
   _escapeHtml(text) {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+    return Util.escapeHtml(text);
   },
 
   _scrollToBottom() {

@@ -394,13 +394,6 @@ body.sidebar-hidden .sidebar {
   line-height: 1.4;
 }
 
-.search-result-line {
-  font-family: var(--font-mono);
-  font-size: 0.714rem;
-  color: var(--text-muted);
-  opacity: 0.6;
-}
-
 mark {
   background: rgba(167, 139, 250, 0.25);
   color: var(--accent);
@@ -545,15 +538,6 @@ mark {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--accent);
-}
-
-.sync-btn.syncing {
-  color: var(--accent);
-  pointer-events: none;
-}
-
-.sync-btn.syncing .sync-icon {
-  animation: spin 1s linear infinite;
 }
 
 .sync-btn.hidden {
@@ -1333,17 +1317,6 @@ mark {
   color: var(--text-muted);
 }
 
-.settings-row-path {
-  font-size: 0.714rem;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 240px;
-}
-
 .settings-action-btn {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -1755,10 +1728,10 @@ mark {
 .note-nav:hover { opacity: 1; }
 .note-nav.hidden { display: none; }
 .note-nav-btn {
-  background: var(--bg-dark);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 4px;
-  color: var(--fg-dim);
+  color: var(--text-secondary);
   width: 24px;
   height: 24px;
   display: flex;
@@ -1770,7 +1743,7 @@ mark {
 }
 .note-nav-btn:hover:not(:disabled) {
   background: var(--bg-hover);
-  color: var(--fg);
+  color: var(--text-primary);
 }
 .note-nav-btn:disabled {
   opacity: 0.3;
@@ -1918,12 +1891,6 @@ mark {
 .toc-item.h2 { padding-left: 16px; }
 .toc-item.h3 { padding-left: 24px; font-size: 0.714rem; color: var(--text-muted); }
 .toc-item.h4 { padding-left: 32px; font-size: 0.714rem; color: var(--text-muted); }
-
-.toc-empty {
-  font-size: 0.786rem;
-  color: var(--text-muted);
-  padding: 8px 14px;
-}
 
 /* Adjust preview/editor when TOC is visible */
 .content.toc-visible .preview {
@@ -2783,7 +2750,7 @@ body.claude-open {
 .claude-model-select {
   -webkit-appearance: none;
   appearance: none;
-  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E") no-repeat right 6px center;
+  background: var(--bg-base) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23999'/%3E%3C/svg%3E") no-repeat right 6px center;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -2971,16 +2938,16 @@ body.claude-open {
 .claude-not-installed-title {
   font-size: 1.071rem;
   font-weight: 600;
-  color: var(--fg);
+  color: var(--text-primary);
 }
 .claude-not-installed-text {
   font-size: 0.857rem;
-  color: var(--fg-dim);
+  color: var(--text-secondary);
   line-height: 1.4;
 }
 .claude-not-installed-cmd {
   display: block;
-  background: var(--bg-dark);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px 14px;
@@ -3108,10 +3075,7 @@ body.claude-open {
   border: 2px solid var(--border-light);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: claude-spin 0.6s linear infinite;
-}
-@keyframes claude-spin {
-  to { transform: rotate(360deg); }
+  animation: spin 0.6s linear infinite;
 }
 .claude-tool-status {
   font-size: 0.714rem;
@@ -4030,7 +3994,7 @@ body.claude-maximized.claude-graph-active .claude-graph {
   border: 2px solid transparent;
   border-top-color: var(--accent);
   border-right-color: rgba(167, 139, 250, 0.3);
-  animation: graph-spin 0.8s linear infinite;
+  animation: spin 0.8s linear infinite;
 }
 .claude-graph-node.working .claude-graph-node-antenna::after {
   animation: agent-pulse 1.2s ease-in-out infinite;
@@ -4107,7 +4071,6 @@ body.claude-maximized.claude-graph-active .claude-graph {
   border-color: rgba(102, 102, 102, 0.3);
 }
 
-
 /* === Graph Animations === */
 @keyframes agent-node-in {
   0% { opacity: 0; transform: scale(0); }
@@ -4125,10 +4088,6 @@ body.claude-maximized.claude-graph-active .claude-graph {
   50% { box-shadow: 0 0 0 8px rgba(167, 139, 250, 0), 0 4px 12px rgba(0,0,0,0.3); }
 }
 
-@keyframes graph-spin {
-  to { transform: rotate(360deg); }
-}
-
 @keyframes bubble-in {
   from { opacity: 0; transform: translateX(-50%) scale(0.8) translateY(4px); }
   to { opacity: 1; transform: translateX(-50%) scale(1) translateY(0); }
@@ -4144,7 +4103,6 @@ body.claude-maximized.claude-graph-active .claude-graph {
   50% { box-shadow: 0 0 0 10px rgba(74, 222, 128, 0), 0 4px 12px rgba(0,0,0,0.3); }
   100% { box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 }
-
 
 /* === Sectioned preview =====================================================
  *
