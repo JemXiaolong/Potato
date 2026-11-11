@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"Permisos de la ventana principal: APIs core de Tauri (eventos, ventana, path). Los comandos propios de la app no requieren entrada aqui.","local":true,"windows":["main"],"permissions":["core:default"]}}
