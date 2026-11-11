@@ -871,7 +871,6 @@ fn pick_pdf_path(default_name: String) -> Option<String> {
 #[cfg(target_os = "linux")]
 #[tauri::command]
 async fn export_pdf(window: tauri::WebviewWindow, output_path: String) -> Result<String, String> {
-    use std::sync::mpsc;
     use std::time::Duration;
 
     // GTK writes to a URI, not a bare path.
@@ -881,10 +880,16 @@ async fn export_pdf(window: tauri::WebviewWindow, output_path: String) -> Result
             return Err(format!("La carpeta destino no existe: {}", parent.display()));
         }
     }
-    let uri = format!("file://{}", output_path);
+    // filename_to_uri codifica "#", "?", "%" y espacios; un format!("file://")
+    // directo rompia rutas con esos caracteres.
+    let uri = glib::filename_to_uri(&path_buf, None)
+        .map_err(|e| format!("Ruta invalida para PDF: {e}"))?
+        .to_string();
     let result_path = output_path.clone();
 
-    let (tx, rx) = mpsc::channel::<Result<(), String>>();
+    // Canal de tokio: esperar con .await no bloquea un hilo del runtime
+    // (std::sync::mpsc::recv_timeout lo ocupaba hasta 180 s).
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Result<(), String>>();
 
     window
         .with_webview(move |webview| {
@@ -912,34 +917,40 @@ async fn export_pdf(window: tauri::WebviewWindow, output_path: String) -> Result
             operation.set_print_settings(&settings);
             operation.set_page_setup(&page_setup);
 
+            // print() returns immediately and the job continues on the GTK main
+            // loop, so the operation must outlive this closure. It is parked in
+            // `keep_alive` and released when the job finishes or fails (antes se
+            // hacia mem::forget y se filtraba una operacion por exportacion).
+            let keep_alive = std::rc::Rc::new(std::cell::RefCell::new(Some(operation.clone())));
+
             let tx_done = tx.clone();
+            let hold = keep_alive.clone();
             operation.connect_finished(move |_| {
                 let _ = tx_done.send(Ok(()));
+                hold.borrow_mut().take();
             });
             let tx_fail = tx.clone();
+            let hold = keep_alive;
             operation.connect_failed(move |_, err| {
                 let _ = tx_fail.send(Err(err.to_string()));
+                hold.borrow_mut().take();
             });
 
             operation.print();
-
-            // print() returns immediately and the job continues on the GTK main
-            // loop. Dropping the operation here would cancel it, so the handle
-            // is deliberately leaked; it is freed when the process exits.
-            std::mem::forget(operation);
         })
         .map_err(|e| format!("No se pudo acceder al webview: {}", e))?;
 
     // Large notes take a while to paginate, hence the generous ceiling.
-    match rx.recv_timeout(Duration::from_secs(180)) {
-        Ok(Ok(())) => {
+    match tokio::time::timeout(Duration::from_secs(180), rx.recv()).await {
+        Ok(Some(Ok(()))) => {
             if PathBuf::from(&result_path).exists() {
                 Ok(result_path)
             } else {
                 Err("La impresion termino pero no se genero el archivo".to_string())
             }
         }
-        Ok(Err(e)) => Err(e),
+        Ok(Some(Err(e))) => Err(e),
+        Ok(None) => Err("La impresion se cancelo".to_string()),
         Err(_) => Err("La exportacion excedio el tiempo limite".to_string()),
     }
 }
@@ -1326,8 +1337,11 @@ fn claude_stop(id: &str) -> Result<(), String> {
     let pid = claude_registry(|map| map.remove(id));
     match pid {
         Some(p) => {
+            // PID negativo = todo el grupo de procesos creado en el spawn.
+            // El registro se limpia justo despues de wait(), lo que reduce al
+            // minimo la ventana en la que el PID podria reutilizarse.
             let _ = std::process::Command::new("kill")
-                .args(["-TERM", &p.to_string()])
+                .args(["-TERM", "--", &format!("-{p}")])
                 .output();
             Ok(())
         }
@@ -1605,6 +1619,15 @@ async fn send_claude_message(
 
         if prompt_via_stdin {
             cmd.stdin(Stdio::piped());
+        }
+
+        // Grupo de procesos propio (pgid = pid): al detener se envia la senal
+        // a todo el grupo, incluidos subprocesos (servidores MCP, herramientas)
+        // que antes quedaban huerfanos al matar solo el PID principal.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
         }
 
         if let Some(ref dir) = working_dir {

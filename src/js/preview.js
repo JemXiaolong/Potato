@@ -352,6 +352,15 @@ const Preview = {
     const processed = Wikilinks.renderInMarkdown(body);
     mark('wikilinks');
 
+    // Secciones ya renderizadas, indexadas por contenido y posicion de sus
+    // encabezados. En modo split cada tecla reconstruia todo el preview (y
+    // Mermaid redibujaba cada diagrama); ahora solo se re-renderizan las
+    // secciones cuyo texto cambio.
+    const reusable = new Map();
+    for (const c of this._chunks) {
+      if (c.rendered && c.el) reusable.set(c.headingStart + '\u0000' + c.text, c.el);
+    }
+
     this._teardown();
     mark('teardown');
 
@@ -371,7 +380,7 @@ const Preview = {
     // even though V8 handles the same input in well under a second. Each slice
     // is lexed only when its section is hydrated, so the lexer only ever sees a
     // few kilobytes at a time.
-    this._sliceIntoChunks(processed);
+    this._sliceIntoChunks(processed, reusable);
     mark('sliced chunks=' + this._chunks.length + ' headings=' + this._headings.length);
 
     if (opts.full) {
@@ -403,7 +412,7 @@ const Preview = {
   //   * otherwise at a blank line, and never where it would cut a table apart
   // Headings are collected in the same pass so the table of contents is
   // available without parsing anything.
-  _sliceIntoChunks(text) {
+  _sliceIntoChunks(text, reusable) {
     const lines = text.split('\n');
     const maxLines = this._maxChunkLines;
     const minLines = this._minChunkLines;
@@ -496,8 +505,18 @@ const Preview = {
       const section = document.createElement('section');
       section.className = 'pv-chunk';
       section.dataset.chunk = String(chunk.index);
-      section.style.minHeight = chunk.estHeight + 'px';
       chunk.el = section;
+
+      const key = chunk.headingStart + '\u0000' + chunk.text;
+      const previous = reusable && reusable.get(key);
+      if (previous) {
+        // Mover los nodos ya renderizados (incluidos SVG de Mermaid).
+        reusable.delete(key);
+        while (previous.firstChild) section.appendChild(previous.firstChild);
+        chunk.rendered = true;
+      } else {
+        section.style.minHeight = chunk.estHeight + 'px';
+      }
       fragment.appendChild(section);
     }
     this._bodyEl.appendChild(fragment);

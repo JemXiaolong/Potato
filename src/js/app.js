@@ -350,7 +350,15 @@ const App = {
     if (!this.state.vaultPath) return;
     await this._updateChangedFiles();
     const entries = await this.invoke('list_vault', { path: this.state.vaultPath });
-    Sidebar.render(entries);
+
+    // refreshVault corre en cada foco de ventana: si ni el arbol ni los
+    // archivos sin sincronizar cambiaron, no reconstruir el DOM del sidebar.
+    const signature = JSON.stringify(entries) + '\u0000'
+      + [...Sidebar._changedPaths].sort().join('\n');
+    if (signature !== this._sidebarSignature) {
+      this._sidebarSignature = signature;
+      Sidebar.render(entries);
+    }
     this._loadRecentFiles(this.state.vaultPath);
   },
 
@@ -729,39 +737,9 @@ const App = {
   },
 
   _initSidebarResize() {
-    const handle = document.getElementById('sidebar-resize');
-    let startX, startWidth;
-
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      startX = e.clientX;
-      // Leer el valor actual (se escribe en documentElement, no en body).
-      startWidth = parseInt(
-        getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10
-      ) || 240;
-
-      handle.classList.add('dragging');
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-
-      const onMove = (e) => {
-        const diff = e.clientX - startX;
-        const newWidth = Math.max(160, Math.min(600, startWidth + diff));
-        document.documentElement.style.setProperty('--sidebar-w', newWidth + 'px');
-      };
-
-      const onUp = () => {
-        handle.classList.remove('dragging');
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
+    Util.makeResizer('sidebar-resize', '--sidebar-w', 160, 600, 240);
   },
+
 
   // -- Keyboard shortcuts --------------------------------------------------
 
@@ -847,21 +825,8 @@ const App = {
     const btn = document.getElementById('menu-btn');
     const dropdown = document.getElementById('menu-dropdown');
 
-    // Toggle menu
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      dropdown.classList.toggle('open');
-    });
-
-    // Close on click outside
-    document.addEventListener('click', () => {
-      dropdown.classList.remove('open');
-    });
-
-    // Prevent closing when clicking inside menu
-    dropdown.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
+    // Abrir/cerrar; clic fuera o Escape lo cierran
+    Util.bindPopup(btn, dropdown);
 
     // Menu actions
     document.getElementById('menu-open-vault').addEventListener('click', () => {
@@ -1880,15 +1845,7 @@ const App = {
     Sidebar.setSortMode(mode);
     this._markSortSelection(mode);
 
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      menu.classList.toggle('open');
-    });
-    document.addEventListener('click', () => menu.classList.remove('open'));
-    menu.addEventListener('click', (e) => e.stopPropagation());
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') menu.classList.remove('open');
-    });
+    Util.bindPopup(btn, menu);
 
     menu.querySelectorAll('.sort-menu-item').forEach((item) => {
       item.addEventListener('click', () => {
@@ -1980,14 +1937,7 @@ const App = {
     const btn = document.getElementById('share-btn');
     const menu = document.getElementById('share-menu');
 
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      menu.classList.toggle('open');
-    });
-
-    // Any click elsewhere dismisses it.
-    document.addEventListener('click', () => menu.classList.remove('open'));
-    menu.addEventListener('click', (e) => e.stopPropagation());
+    Util.bindPopup(btn, menu);
 
     document.getElementById('share-menu-link').addEventListener('click', () => {
       menu.classList.remove('open');
@@ -1997,10 +1947,6 @@ const App = {
     document.getElementById('share-menu-pdf').addEventListener('click', () => {
       menu.classList.remove('open');
       this.exportPdf();
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') menu.classList.remove('open');
     });
   },
 

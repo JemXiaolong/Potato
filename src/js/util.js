@@ -33,6 +33,71 @@ const Util = {
     return this.sanitize(marked.parse(markdown));
   },
 
+  // -- UI: resizers y menus emergentes --------------------------------------
+
+  /**
+   * Permite redimensionar arrastrando `handleId`, escribiendo el ancho en la
+   * variable CSS `cssVar` de :root, acotado a [min, max].
+   */
+  makeResizer(handleId, cssVar, min, max, fallback) {
+    const handle = document.getElementById(handleId);
+    if (!handle) return;
+
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const root = document.documentElement;
+      const startWidth = parseInt(getComputedStyle(root).getPropertyValue(cssVar), 10) || fallback;
+
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      const onMove = (ev) => {
+        const width = Math.max(min, Math.min(max, startWidth + ev.clientX - startX));
+        root.style.setProperty(cssVar, width + 'px');
+      };
+
+      const onUp = () => {
+        handle.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  },
+
+  _popups: [],
+
+  /**
+   * Menu emergente: `btn` lo abre/cierra; un clic fuera o Escape lo cierra.
+   * Todos los menus comparten un unico par de listeners en document (antes
+   * cada menu registraba los suyos).
+   */
+  bindPopup(btn, menu) {
+    if (!btn || !menu) return;
+    if (this._popups.length === 0) {
+      const closeAll = () => this._popups.forEach((m) => m.classList.remove('open'));
+      document.addEventListener('click', closeAll);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeAll();
+      });
+    }
+    this._popups.push(menu);
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const willOpen = !menu.classList.contains('open');
+      this._popups.forEach((m) => m.classList.remove('open'));
+      menu.classList.toggle('open', willOpen);
+    });
+    menu.addEventListener('click', (e) => e.stopPropagation());
+  },
+
   // -- Mermaid (carga diferida) ---------------------------------------------
 
   _mermaidPromise: null,

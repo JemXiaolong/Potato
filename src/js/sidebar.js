@@ -54,6 +54,7 @@ const Sidebar = {
   // 'name-asc' | 'name-desc' | 'mtime-desc' | 'mtime-asc'
   _sortMode: 'name-asc',
   _entries: null,
+  _dirStats: new Map(),
 
   setSortMode(mode) {
     this._sortMode = mode;
@@ -126,6 +127,7 @@ const Sidebar = {
     this._entries = entries;
 
     this._container.innerHTML = '';
+    this._annotate(entries);
     this._renderEntries(this._sortEntries(entries), this._container, 0);
 
     // Restore expanded directories
@@ -173,29 +175,31 @@ const Sidebar = {
     return clean;
   },
 
-  // Check if any file in entries (recursive) is unsynced
-  _hasUnsyncedFiles(entries) {
-    for (const entry of entries) {
-      if (entry.is_dir && entry.children) {
-        if (this._hasUnsyncedFiles(entry.children)) return true;
-      } else if (!entry.is_dir && this._changedPaths.has(entry.path)) {
-        return true;
+  /**
+   * Calcula en un solo recorrido post-orden, para cada directorio, el total de
+   * archivos y si contiene archivos sin sincronizar. Antes cada directorio
+   * volvia a recorrer su subarbol completo (O(n * profundidad)).
+   */
+  _annotate(entries) {
+    const stats = new Map();
+    const walk = (list) => {
+      let count = 0;
+      let unsynced = false;
+      for (const entry of list) {
+        if (entry.is_dir) {
+          const child = walk(entry.children || []);
+          stats.set(entry, child);
+          count += child.count;
+          unsynced = unsynced || child.unsynced;
+        } else {
+          count++;
+          unsynced = unsynced || this._changedPaths.has(entry.path);
+        }
       }
-    }
-    return false;
-  },
-
-  // Count total files (recursive)
-  _countFiles(entries) {
-    let count = 0;
-    for (const entry of entries) {
-      if (entry.is_dir && entry.children) {
-        count += this._countFiles(entry.children);
-      } else if (!entry.is_dir) {
-        count++;
-      }
-    }
-    return count;
+      return { count, unsynced };
+    };
+    walk(entries);
+    this._dirStats = stats;
   },
 
   _renderEntries(entries, parent, depth) {
@@ -209,7 +213,8 @@ const Sidebar = {
   },
 
   _renderDir(entry, parent, depth) {
-    const dirHasUnsynced = entry.children && this._hasUnsyncedFiles(entry.children);
+    const stats = this._dirStats.get(entry) || { count: 0, unsynced: false };
+    const dirHasUnsynced = stats.unsynced;
 
     const item = document.createElement('div');
     item.className = 'tree-item dir' + (dirHasUnsynced ? ' unsynced' : '');
@@ -227,7 +232,7 @@ const Sidebar = {
 
     // File count badge
     if (entry.children && entry.children.length > 0) {
-      const count = this._countFiles([entry]);
+      const count = stats.count;
       const badge = document.createElement('span');
       badge.className = 'tree-badge';
       badge.textContent = count;

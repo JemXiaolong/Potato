@@ -1884,37 +1884,9 @@ const Claude = {
   // -- Compact note resize ---------------------------------------------------
 
   _initCompactNoteResize() {
-    const handle = document.getElementById('compact-note-resize');
-    let startX, startWidth;
-
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      startX = e.clientX;
-      const current = getComputedStyle(document.documentElement).getPropertyValue('--compact-note-w');
-      startWidth = parseInt(current, 10) || 280;
-
-      handle.classList.add('dragging');
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-
-      const onMove = (e) => {
-        const diff = e.clientX - startX;
-        const newWidth = Math.max(180, Math.min(600, startWidth + diff));
-        document.documentElement.style.setProperty('--compact-note-w', newWidth + 'px');
-      };
-
-      const onUp = () => {
-        handle.classList.remove('dragging');
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
-
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
+    Util.makeResizer('compact-note-resize', '--compact-note-w', 180, 600, 280);
   },
+
 
   // -- Helpers ---------------------------------------------------------------
 
