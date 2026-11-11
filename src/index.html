@@ -506,73 +506,53 @@
         <!-- Step 0: Bienvenida -->
         <div class="whatsnew-step" id="whatsnew-step-0">
           <div class="whatsnew-icon">&#127881;</div>
-          <div class="whatsnew-title">POTATO v0.21.0</div>
-          <div class="whatsnew-desc">Exportacion a PDF, soporte de notas de cualquier tama&#241;o y orden configurable del arbol de archivos.</div>
+          <div class="whatsnew-title">POTATO v0.22.1</div>
+          <div class="whatsnew-desc">Version enfocada en seguridad, rendimiento y correcciones: POTATO es mas rapido al arrancar, mas fluido al editar y mas seguro con notas de repositorios compartidos.</div>
         </div>
-        <!-- Step 1: Exportar a PDF -->
+        <!-- Step 1: Seguridad -->
         <div class="whatsnew-step hidden" id="whatsnew-step-1">
-          <div class="whatsnew-icon">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-              <path d="M14 2v6h6"/>
-              <path d="M8.5 14h7M8.5 17.5h4.5"/>
-            </svg>
-          </div>
-          <div class="whatsnew-title">Exportar a PDF</div>
-          <div class="whatsnew-desc">Desde el boton <strong>Compartir</strong> o con <code>Ctrl+Shift+P</code>. Formato de lectura en claro, cabecera con la ruta y la fecha, y el logo como marca de agua en cada pagina. Lo genera el motor del propio POTATO: no necesitas instalar nada.</div>
+          <div class="whatsnew-icon">&#128737;</div>
+          <div class="whatsnew-title">Notas mas seguras</div>
+          <div class="whatsnew-desc">El contenido de las notas y las respuestas de Claude se sanitiza antes de mostrarse, y la app tiene una politica de seguridad de contenido. Un script incrustado en una nota ya no puede ejecutarse.</div>
         </div>
-        <!-- Step 2: Archivos grandes -->
+        <!-- Step 2: Rendimiento -->
         <div class="whatsnew-step hidden" id="whatsnew-step-2">
           <div class="whatsnew-icon">&#9889;</div>
-          <div class="whatsnew-title">Notas de cualquier tama&#241;o</div>
-          <div class="whatsnew-desc">Una nota de 6 MB con 80,000 lineas antes no abria; ahora abre en menos de un segundo. El documento se renderiza por secciones y solo se procesa lo que estas viendo.</div>
+          <div class="whatsnew-title">Mas rapido</div>
+          <div class="whatsnew-desc">Mermaid se carga solo cuando una nota tiene diagramas, el modo dividido solo re-renderiza lo que cambio y el sidebar ya no se reconstruye cada vez que vuelves a la ventana.</div>
         </div>
-        <!-- Step 3: Orden del arbol -->
+        <!-- Step 3: Correcciones -->
         <div class="whatsnew-step hidden" id="whatsnew-step-3">
-          <div class="whatsnew-icon">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="4" y1="6" x2="14" y2="6"/>
-              <line x1="4" y1="12" x2="11" y2="12"/>
-              <line x1="4" y1="18" x2="8" y2="18"/>
-              <polyline points="17 14 19.5 17 22 14"/>
-              <line x1="19.5" y1="6" x2="19.5" y2="17"/>
-            </svg>
-          </div>
-          <div class="whatsnew-title">Ordenar archivos</div>
-          <div class="whatsnew-desc">Nuevo boton en la cabecera del vault: nombre <strong>A &rarr; Z</strong>, <strong>Z &rarr; A</strong> o por <strong>fecha de modificacion</strong>. Aplica tambien dentro de las subcarpetas y se recuerda entre sesiones.</div>
-        </div>
-        <!-- Step 4: Detalles -->
-        <div class="whatsnew-step hidden" id="whatsnew-step-4">
           <div class="whatsnew-icon">&#128295;</div>
           <div class="whatsnew-title">Mejoras y correcciones</div>
           <div class="whatsnew-steps-list">
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">1</span>
-              <span>El panel de <strong>Claude</strong> ya no falla con notas grandes (antes se rompia arriba de ~128 KB)</span>
+              <span>Las barras de progreso de <strong>clonado</strong> y <strong>actualizacion</strong> vuelven a avanzar</span>
             </div>
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">2</span>
-              <span>Abrir una nota ya no la vuelve a guardar sin que la hayas tocado</span>
+              <span>El sync con Git funciona con el sistema en espa&#241;ol y con archivos con acentos</span>
             </div>
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">3</span>
-              <span>Los cambios externos se detectan por tama&#241;o y fecha, sin releer el archivo completo</span>
+              <span><kbd>Esc</kbd> ya no cierra la nota mientras usas un menu, un modal o el chat</span>
             </div>
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">4</span>
-              <span>Los diagramas Mermaid ya no se redibujan en cada tecla</span>
+              <span>Al detener a Claude tambien se detienen sus subprocesos (servidores MCP)</span>
             </div>
             <div class="whatsnew-steps-item">
               <span class="whatsnew-step-num">5</span>
-              <span>Las notas de mas de 1 MB abren en modo lectura, que es fluido</span>
+              <span>La app ya no ofrece de nuevo la actualizacion que acabas de instalar</span>
             </div>
           </div>
         </div>
-        <!-- Step 5: Listo -->
-        <div class="whatsnew-step hidden" id="whatsnew-step-5">
+        <!-- Step 4: Listo -->
+        <div class="whatsnew-step hidden" id="whatsnew-step-4">
           <div class="whatsnew-icon">&#128640;</div>
           <div class="whatsnew-title">&#161;Listo!</div>
-          <div class="whatsnew-desc">Abre una nota y prueba <code>Ctrl+Shift+P</code> para exportarla a PDF, o el nuevo boton de orden junto al nombre del vault.</div>
+          <div class="whatsnew-desc">Todo sigue donde lo dejaste. Si algo no se ve bien, reportalo con la salida de la terminal.</div>
         </div>
       </div>
       <div class="modal-footer whatsnew-footer">

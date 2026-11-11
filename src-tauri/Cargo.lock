@@ -2691,7 +2691,7 @@ dependencies = [
 
 [[package]]
 name = "potato"
-version = "0.22.0"
+version = "0.22.1"
 dependencies = [
  "dirs 6.0.0",
  "glib",

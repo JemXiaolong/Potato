@@ -42,6 +42,11 @@ const App = {
       this.invoke = async () => null;
     }
 
+    // La version real viene del binario (tauri.conf.json). Antes estaba fija
+    // en este archivo y, si no se actualizaba al publicar, la app instalada
+    // volvia a ofrecer la misma actualizacion indefinidamente.
+    await this._loadAppVersion();
+
     // Inicializar componentes
     Sidebar.init(
       'file-tree',
@@ -2446,8 +2451,19 @@ const App = {
 
   // -- Updates ---------------------------------------------------------------
 
-  _appVersion: '0.21.0',
+  // Solo se usa si la API de Tauri no responde; el valor real lo obtiene
+  // _loadAppVersion() al iniciar.
+  _appVersion: '0.22.1',
   _updateUrl: null,
+
+  async _loadAppVersion() {
+    try {
+      const version = await window.__TAURI__.app.getVersion();
+      if (version) this._appVersion = version;
+    } catch (e) {
+      console.warn('No se pudo leer la version de la app:', e);
+    }
+  },
 
   async _checkForUpdates() {
     try {
